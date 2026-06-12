@@ -27,16 +27,16 @@ test("anchors have labels, colors, scales, and fixed non-origin positions", () =
 
 test("uses the fixed anatomical region palette", () => {
   assert.deepEqual(REGION_COLORS, {
-    hippocampus: "#ffb000",
-    prefrontal: "#4f8cff",
-    amygdala: "#ff3b5c",
-    temporalCortex: "#9b5cff",
-    parietalCortex: "#00b8a9",
-    basalGanglia: "#6d5dfc",
-    cerebellum: "#00c853",
-    motorCortex: "#ff7043",
-    insula: "#ec407a",
-    associationCortex: "#b0bec5",
-    entorhinal: "#26a69a",
+    hippocampus: "#ffd38a",
+    prefrontal: "#8edfff",
+    amygdala: "#ff8fa8",
+    temporalCortex: "#b9a7ff",
+    parietalCortex: "#7ee8d3",
+    basalGanglia: "#978cff",
+    cerebellum: "#9ce4ba",
+    motorCortex: "#ffad8a",
+    insula: "#e99fd1",
+    associationCortex: "#d9e4e8",
+    entorhinal: "#80d8d0",
   });
 });

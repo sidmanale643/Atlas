@@ -686,21 +686,29 @@ function setRegionMarkerWeight(marker, value) {
   marker.scale.setScalar(
     markerScale * (isDeepRegion ? 1.1 + weight * 0.55 : 0.85 + weight * 0.75),
   );
-  coreMaterial.opacity = weight * (isDeepRegion ? 0.2 : 0.12);
-  glowMaterial.opacity = weight * (isDeepRegion ? 0.5 : 0.38);
+  coreMaterial.opacity = weight * (isDeepRegion ? 0.42 : 0.28);
+  glowMaterial.opacity = weight * (isDeepRegion ? 0.78 : 0.58);
 }
 
 function applyBrainMaterial(model) {
   model.traverse((child) => {
     if (!child.isMesh) return;
 
-    child.material = new THREE.MeshStandardMaterial({
-      color: "#d8d2c4",
-      roughness: 0.75,
-      metalness: 0.05,
+    child.material = new THREE.MeshPhysicalMaterial({
+      color: "#f4eee2",
+      emissive: "#9bb9bc",
+      emissiveIntensity: 0.035,
+      roughness: 0.22,
+      metalness: 0,
+      transmission: 0.32,
+      thickness: 0.65,
+      ior: 1.18,
+      clearcoat: 1,
+      clearcoatRoughness: 0.18,
       transparent: true,
-      opacity: 0.18,
+      opacity: 0.3,
       depthWrite: false,
+      side: THREE.DoubleSide,
     });
   });
 }
@@ -790,10 +798,11 @@ function renderMemoryNodes() {
       const material = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: activation.isPrimary ? 0.24 : 0.16,
-        roughness: 0.28,
-        metalness: 0.05,
+        emissiveIntensity: activation.isPrimary ? 1.4 : 0.85,
+        roughness: 0.16,
+        metalness: 0,
         transparent: true,
+        opacity: activation.isPrimary ? 0.96 : 0.82,
       });
       const geometry = activation.isPrimary
         ? createMemoryNodeGeometry(dominantType, radius)
@@ -869,14 +878,14 @@ function createConstellationConnections(memoryId, state) {
       const tubeMaterial = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: THREE.MathUtils.lerp(0.08, 0.2, activation.weight),
+        opacity: THREE.MathUtils.lerp(0.12, 0.28, activation.weight),
         blending: THREE.AdditiveBlending,
         depthWrite: false,
       });
       const glowMaterial = new THREE.MeshBasicMaterial({
         color,
         transparent: true,
-        opacity: 0.02,
+        opacity: 0.045,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.BackSide,
@@ -1253,6 +1262,7 @@ function formatRelativeDate(value) {
 
 function renderBrainModel() {
   const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x121718, 0.055);
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
   const renderer = new THREE.WebGLRenderer({
     canvas: brainCanvas,
@@ -1263,10 +1273,12 @@ function renderBrainModel() {
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.18;
   camera.position.set(0, 0, 7);
   brainCamera = camera;
   scene.add(brain);
-  scene.add(new THREE.HemisphereLight(0xfff7e8, 0x4a3a36, 3));
+  scene.add(new THREE.HemisphereLight(0xfff8e9, 0x172527, 2.4));
 
   const controls = new OrbitControls(camera, brainCanvas);
   brainControls = controls;
@@ -1324,13 +1336,17 @@ function renderBrainModel() {
     if (hit) selectMemory(hit.object.userData.memoryId);
   });
 
-  const keyLight = new THREE.DirectionalLight(0xffead8, 4);
+  const keyLight = new THREE.DirectionalLight(0xfff3df, 5.2);
   keyLight.position.set(-3, 4, 5);
   scene.add(keyLight);
 
-  const rimLight = new THREE.DirectionalLight(0xc9d8d3, 1.6);
+  const rimLight = new THREE.DirectionalLight(0x8ee7ff, 3.2);
   rimLight.position.set(4, -1, 2);
   scene.add(rimLight);
+
+  const lowerLight = new THREE.PointLight(0xb7a4ff, 2.8, 12);
+  lowerLight.position.set(-2.5, -3, 3);
+  scene.add(lowerLight);
 
   new OBJLoader().load("brain.obj", (model) => {
     const bounds = new THREE.Box3().setFromObject(model);

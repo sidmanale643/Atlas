@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Newsreader:opsz,wght@6..72,300;6..72,500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=5" />
+    <link rel="stylesheet" href="styles.css?v=6" />
     <script type="importmap">
       {
         "imports": {
@@ -68,15 +68,30 @@
 
           <div class="legend">
             <div class="section-label">
-              <span>KEY</span>
-              <span>Memory fragments</span>
+              <span>Memory legend</span>
+              <span>Symbol maps to fragment type</span>
             </div>
-            <ul>
-              <li><span class="legend-dot event"></span>Event</li>
-              <li><span class="legend-dot person"></span>Person</li>
-              <li><span class="legend-dot place"></span>Place</li>
-              <li><span class="legend-dot time"></span>Time</li>
-              <li><span class="legend-dot activity"></span>Activity</li>
+            <ul aria-label="Memory fragment symbols">
+              <li>
+                <span class="legend-symbol event" aria-hidden="true"></span>
+                <span>Event</span>
+              </li>
+              <li>
+                <span class="legend-symbol person" aria-hidden="true"></span>
+                <span>Person</span>
+              </li>
+              <li>
+                <span class="legend-symbol place" aria-hidden="true"></span>
+                <span>Place</span>
+              </li>
+              <li>
+                <span class="legend-symbol time" aria-hidden="true"></span>
+                <span>Time</span>
+              </li>
+              <li>
+                <span class="legend-symbol activity" aria-hidden="true"></span>
+                <span>Activity</span>
+              </li>
             </ul>
           </div>
         </aside>
@@ -104,6 +119,11 @@
           </div>
 
           <div class="brain-stage" id="brainStage">
+            <div class="scan-interface" aria-hidden="true">
+              <span class="scan-status">Live neural field</span>
+              <span class="scan-axis">Sagittal / 03</span>
+              <span class="scan-reticle"></span>
+            </div>
             <canvas
               class="brain-model"
               id="brainModel"
@@ -149,6 +169,6 @@
       </article>
     </template>
 
-    <script type="module" src="app.js?v=10"></script>
+    <script type="module" src="app.js?v=11"></script>
   </body>
 </html>
