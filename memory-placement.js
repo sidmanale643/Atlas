@@ -1,9 +1,9 @@
 import { getRegionAnchor } from "./region-anchors.js";
 
-const MIN_SURFACE_CLEARANCE = 0.34;
-const SURFACE_CLEARANCE_RANGE = 0.12;
-const MIN_TANGENT_OFFSET = 0.12;
-const TANGENT_OFFSET_RANGE = 0.3;
+const MIN_REGION_INSET = 0.34;
+const REGION_INSET_RANGE = 0.14;
+const MIN_TANGENT_OFFSET = 0.04;
+const TANGENT_OFFSET_RANGE = 0.14;
 
 export function getDominantRegion(regions) {
   let dominant = null;
@@ -16,7 +16,12 @@ export function getDominantRegion(regions) {
       continue;
     }
 
-    if (!dominant || activation.weight > dominant.weight) {
+    if (
+      !dominant ||
+      activation.weight > dominant.weight ||
+      (activation.weight === dominant.weight &&
+        activation.region.localeCompare(dominant.region) < 0)
+    ) {
       dominant = activation;
     }
   }
@@ -26,7 +31,11 @@ export function getDominantRegion(regions) {
 
 export function calculateMemoryPosition(memoryId, regions) {
   const dominantRegion = getDominantRegion(regions);
-  const anchor = getRegionAnchor(dominantRegion);
+  return calculateRegionPosition(memoryId, dominantRegion);
+}
+
+export function calculateRegionPosition(memoryId, region) {
+  const anchor = getRegionAnchor(region);
   if (!anchor) return null;
 
   const outward = normalize(anchor.position);
@@ -35,19 +44,20 @@ export function calculateMemoryPosition(memoryId, regions) {
   const tangentA = normalize(cross(outward, reference));
   const tangentB = cross(outward, tangentA);
 
-  const angle = hashUnit(`${memoryId}:angle`) * Math.PI * 2;
+  const angle = hashUnit(`${memoryId}:${region}:angle`) * Math.PI * 2;
   const tangentDistance =
-    MIN_TANGENT_OFFSET + hashUnit(`${memoryId}:distance`) * TANGENT_OFFSET_RANGE;
-  const clearance =
-    MIN_SURFACE_CLEARANCE +
-    hashUnit(`${memoryId}:clearance`) * SURFACE_CLEARANCE_RANGE;
+    MIN_TANGENT_OFFSET +
+    hashUnit(`${memoryId}:${region}:distance`) * TANGENT_OFFSET_RANGE;
+  const inset =
+    MIN_REGION_INSET +
+    hashUnit(`${memoryId}:${region}:inset`) * REGION_INSET_RANGE;
   const tangentX = Math.cos(angle) * tangentDistance;
   const tangentY = Math.sin(angle) * tangentDistance;
 
   return anchor.position.map(
     (coordinate, index) =>
       coordinate +
-      outward[index] * clearance +
+      outward[index] * -inset +
       tangentA[index] * tangentX +
       tangentB[index] * tangentY,
   );
@@ -57,11 +67,29 @@ export function createMemoryNodeState(memories) {
   const state = new Map();
 
   for (const memory of memories) {
-    const dominantRegion = getDominantRegion(memory.regions);
-    const position = calculateMemoryPosition(memory.id, memory.regions);
-    if (!dominantRegion || !position) continue;
+    const activations = (memory.regions || [])
+      .filter(
+        ({ region, weight }) =>
+          getRegionAnchor(region) && Number.isFinite(weight) && weight > 0,
+      )
+      .sort(
+        (a, b) => b.weight - a.weight || a.region.localeCompare(b.region),
+      );
+    const dominantRegion = activations[0]?.region;
+    if (!dominantRegion) continue;
 
-    state.set(memory.id, { dominantRegion, position });
+    const nodes = activations.map(({ region, weight }, index) => ({
+      region,
+      weight,
+      isPrimary: index === 0,
+      position: calculateRegionPosition(memory.id, region),
+    }));
+
+    state.set(memory.id, {
+      dominantRegion,
+      position: nodes[0].position,
+      nodes,
+    });
   }
 
   return state;

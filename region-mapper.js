@@ -64,27 +64,61 @@ function addContribution(totals, region, amount) {
   }
 }
 
-export function mapExtractionToRegions(extraction) {
-  const totals = new Map();
+export function getRegionContributions(extraction) {
+  const contributions = [];
 
   for (const { type, weight } of extraction.types || []) {
     const rule = REGION_RULES[type];
     if (!rule || weight <= 0) continue;
 
     for (const [region, regionWeight] of Object.entries(rule)) {
-      addContribution(totals, region, weight * regionWeight);
+      contributions.push({
+        region,
+        source: "type",
+        type,
+        typeWeight: weight,
+        ruleWeight: regionWeight,
+        amount: weight * regionWeight,
+      });
     }
   }
 
   for (const emotion of extraction.emotions || []) {
     const emotionActivation = emotion.intensity * emotion.arousal;
     for (const [region, regionWeight] of Object.entries(EMOTION_REGION_RULE)) {
-      addContribution(totals, region, emotionActivation * regionWeight);
+      contributions.push({
+        region,
+        source: "emotion",
+        label: emotion.label,
+        intensity: emotion.intensity,
+        arousal: emotion.arousal,
+        confidence: emotion.confidence,
+        ruleWeight: regionWeight,
+        amount: emotionActivation * regionWeight,
+      });
     }
   }
 
-  if ((extraction.actions || []).some((action) => PHYSICAL_ACTION_PATTERN.test(action))) {
-    addContribution(totals, "motorCortex", MOTOR_ACTION_ACTIVATION);
+  const physicalAction = (extraction.actions || []).find((action) =>
+    PHYSICAL_ACTION_PATTERN.test(action)
+  );
+  if (physicalAction) {
+    contributions.push({
+      region: "motorCortex",
+      source: "action",
+      action: physicalAction,
+      amount: MOTOR_ACTION_ACTIVATION,
+    });
+  }
+
+  return contributions;
+}
+
+export function mapExtractionToRegions(extraction) {
+  const totals = new Map();
+
+  for (const { region, amount } of getRegionContributions(extraction)) {
+    addContribution(totals, region, amount);
   }
 
   const significant = [...totals.entries()].filter(

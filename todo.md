@@ -233,63 +233,63 @@ Verify:
 
 File: `app.js`
 
-- [ ] Create one `THREE.Raycaster`.
-- [ ] Convert canvas pointer coordinates to normalized device coordinates.
-- [ ] Raycast only against selectable memory objects.
-- [ ] Select the memory ID stored in the hit mesh.
-- [ ] Prevent a drag used for orbiting from also selecting a node.
-- [ ] Stop auto-rotation after the user selects a memory.
-- [ ] Move the camera target toward the selected node with a short transition.
-- [ ] Keep keyboard and list-card selection working.
-- [ ] Make list-card selection focus the matching 3D node.
-- [ ] Add a clear-selection action.
+- [x] Create one `THREE.Raycaster`.
+- [x] Convert canvas pointer coordinates to normalized device coordinates.
+- [x] Raycast only against selectable memory objects.
+- [x] Select the memory ID stored in the hit mesh.
+- [x] Prevent a drag used for orbiting from also selecting a node.
+- [x] Stop auto-rotation after the user selects a memory.
+- [x] Move the camera target toward the selected node with a short transition.
+- [x] Keep keyboard and list-card selection working.
+- [x] Make list-card selection focus the matching 3D node.
+- [x] Add a clear-selection action.
 
 Verify:
 
-- [ ] Clicking empty space does not select a memory.
-- [ ] Clicking a node selects the correct memory.
-- [ ] Orbiting does not cause accidental selections.
-- [ ] Selecting a memory card focuses the same node.
-- [ ] Selection still works after resize and on high-DPI displays.
+- [x] Clicking empty space does not select a memory.
+- [x] Clicking a node selects the correct memory.
+- [x] Orbiting does not cause accidental selections.
+- [x] Selecting a memory card focuses the same node.
+- [x] Selection still works after resize and on high-DPI displays.
 
 ## 9. Draw region connections
 
 File: `app.js`
 
-- [ ] Create a Three.js group for activation connections.
-- [ ] Clear this group whenever selection changes.
-- [ ] Draw lines only for the selected memory.
-- [ ] Connect the memory node to every region above the display threshold.
-- [ ] Vary line opacity or width by activation weight.
-- [ ] Keep secondary-region lines less prominent than the dominant region.
-- [ ] Render lines inside the same transformed coordinate system as the brain
+- [x] Create a Three.js group for activation connections.
+- [x] Clear this group whenever selection changes.
+- [x] Draw lines only for the selected memory.
+- [x] Connect the memory node to every region above the display threshold.
+- [x] Vary line opacity or width by activation weight.
+- [x] Keep secondary-region lines less prominent than the dominant region.
+- [x] Render lines inside the same transformed coordinate system as the brain
       and memory nodes.
-- [ ] Do not render all memories' connections at once.
+- [x] Do not render all memories' connections at once.
 
 Verify:
 
-- [ ] A multi-region memory displays more than one connection.
-- [ ] Connections stay attached while orbiting.
-- [ ] Selecting another memory removes the previous lines.
-- [ ] No stale lines remain after deleting or clearing memories.
+- [x] A multi-region memory displays more than one connection.
+- [x] Connections stay attached while orbiting.
+- [x] Selecting another memory removes the previous lines.
+- [x] No stale lines remain after deleting or clearing memories.
 
 ## 10. Explain activation in the detail panel
 
 Files: `app.js`, `styles.css`
 
-- [ ] Show the selected memory's raw text and summary.
-- [ ] List active regions from highest to lowest weight.
-- [ ] Display each weight as a percentage.
-- [ ] Explain the contributing memory types for each region.
-- [ ] Include emotion contribution when applicable.
-- [ ] Keep extraction confidence separate from region weight.
-- [ ] Show a clear message if an old memory has no region data.
+- [x] Show the selected memory's raw text and summary.
+- [x] List active regions from highest to lowest weight.
+- [x] Display each weight as a percentage.
+- [x] Explain the contributing memory types for each region.
+- [x] Include emotion contribution when applicable.
+- [x] Keep extraction confidence separate from region weight.
+- [x] Show a clear message if an old memory has no region data.
 
 Verify:
 
-- [ ] The explanation matches the mapper output.
-- [ ] Region percentages match the visible highlight strengths.
-- [ ] A user can tell why the dominant region was chosen.
+- [x] The explanation matches the mapper output.
+- [x] Region percentages match the visible highlight strengths.
+- [x] A user can tell why the dominant region was chosen.
 
 ## 11. Remove the SVG graph
 
@@ -424,3 +424,9 @@ Do these only after the 3D MVP and traversal checks pass.
 5. Run section 16 before adding correction or traversal.
 6. Complete sections 12 through 14 for the MVP browsing workflow.
 7. Add embeddings and later work only after the simpler graph paths work.
+
+
+Add reference to skills like cycling reading
+memory decay
+memory confusion testing
+mcp

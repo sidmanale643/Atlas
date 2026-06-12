@@ -14,7 +14,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Newsreader:opsz,wght@6..72,300;6..72,500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=4" />
+    <link rel="stylesheet" href="styles.css?v=5" />
     <script type="importmap">
       {
         "imports": {
@@ -87,9 +87,19 @@
               <span>02</span>
               <span>Association field</span>
             </div>
-            <div class="atlas-count">
-              <strong id="memoryCount">0</strong>
-              <span>memories encoded</span>
+            <div class="atlas-actions">
+              <button
+                class="text-button"
+                id="clearSelectionButton"
+                type="button"
+                hidden
+              >
+                Clear selection
+              </button>
+              <div class="atlas-count">
+                <strong id="memoryCount">0</strong>
+                <span>memories encoded</span>
+              </div>
             </div>
           </div>
 
@@ -101,9 +111,9 @@
             ></canvas>
 
             <div
-              class="memory-node-label"
-              id="memoryNodeLabel"
-              aria-hidden="true"
+              class="memory-hover-panel"
+              id="memoryHoverPanel"
+              role="tooltip"
               hidden
             ></div>
             <div class="empty-state" id="emptyState"></div>
@@ -139,6 +149,6 @@
       </article>
     </template>
 
-    <script type="module" src="app.js?v=6"></script>
+    <script type="module" src="app.js?v=10"></script>
   </body>
 </html>

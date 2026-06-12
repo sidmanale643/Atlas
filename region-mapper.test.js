@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getRegionContributions,
   REGION_MAPPING_VERSION,
   mapExtractionToRegions,
 } from "./region-mapper.js";
@@ -78,6 +79,39 @@ test("a clear physical action adds motor cortex activation", () => {
 
   assert.ok(weightFor(activations, "motorCortex") > 0);
   assertNormalized(activations);
+});
+
+test("reports the inputs that contributed to each region", () => {
+  const contributions = getRegionContributions(
+    extraction({
+      types: [{ type: "episodic", weight: 0.7 }],
+      emotions: [{
+        label: "joy",
+        intensity: 0.8,
+        arousal: 0.5,
+        confidence: 0.9,
+      }],
+      actions: ["ran through the park"],
+    })
+  );
+
+  const hippocampus = contributions.find(
+    ({ region, source }) => region === "hippocampus" && source === "type"
+  );
+  assert.equal(hippocampus.type, "episodic");
+  assert.equal(hippocampus.typeWeight, 0.7);
+  assert.equal(hippocampus.ruleWeight, 0.65);
+  assert.ok(Math.abs(hippocampus.amount - 0.455) < 1e-12);
+  assert.equal(
+    contributions.find(
+      ({ region, source }) => region === "amygdala" && source === "emotion"
+    ).confidence,
+    0.9
+  );
+  assert.equal(
+    contributions.find(({ source }) => source === "action").action,
+    "ran through the park"
+  );
 });
 
 test("mapping is repeatable and sorted by descending weight", () => {

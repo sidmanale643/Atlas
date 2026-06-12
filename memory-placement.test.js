@@ -4,6 +4,7 @@ import test from "node:test";
 import { REGION_ANCHORS } from "./region-anchors.js";
 import {
   calculateMemoryPosition,
+  calculateRegionPosition,
   createMemoryNodeState,
   getDominantRegion,
 } from "./memory-placement.js";
@@ -50,21 +51,82 @@ test("separates memories that share a dominant anchor without insertion order", 
   );
 });
 
-test("places nodes farther from the brain origin than the dominant anchor", () => {
+test("keeps nodes inside the dominant region anchor", () => {
   const anchor = REGION_ANCHORS.prefrontal.position;
-  const position = calculateMemoryPosition("mem_outside", regions);
+  const position = calculateMemoryPosition("mem_inside", regions);
   const distance = (point) => Math.hypot(...point);
 
-  assert.ok(distance(position) > distance(anchor));
+  assert.ok(distance(position) < distance(anchor));
 });
 
-test("stores dominant region and calculated position in memory-node state", () => {
+test("keeps every region's memory positions inside its anchor", () => {
+  const distance = (point) => Math.hypot(...point);
+
+  for (const [region, anchor] of Object.entries(REGION_ANCHORS)) {
+    for (let index = 0; index < 100; index += 1) {
+      const position = calculateRegionPosition(`${region}-${index}`, region);
+
+      assert.ok(
+        distance(position) < distance(anchor.position),
+        `${region} memory ${index} escaped its anchor`,
+      );
+    }
+  }
+});
+
+test("stores one ordered node per activated region", () => {
   const state = createMemoryNodeState([{ id: "mem_state", regions }]);
 
   assert.deepEqual(state.get("mem_state"), {
     dominantRegion: "prefrontal",
     position: calculateMemoryPosition("mem_state", regions),
+    nodes: [
+      {
+        region: "prefrontal",
+        weight: 0.65,
+        isPrimary: true,
+        position: calculateRegionPosition("mem_state", "prefrontal"),
+      },
+      {
+        region: "hippocampus",
+        weight: 0.35,
+        isPrimary: false,
+        position: calculateRegionPosition("mem_state", "hippocampus"),
+      },
+    ],
   });
+});
+
+test("keeps every constellation node near its own region", () => {
+  const state = createMemoryNodeState([
+    {
+      id: "mem_constellation",
+      regions: [
+        { region: "hippocampus", weight: 0.5 },
+        { region: "amygdala", weight: 0.2 },
+        { region: "temporalCortex", weight: 0.2 },
+        { region: "prefrontal", weight: 0.1 },
+      ],
+    },
+  ]).get("mem_constellation");
+
+  assert.equal(state.nodes.length, 4);
+  for (const node of state.nodes) {
+    assert.deepEqual(
+      node.position,
+      calculateRegionPosition("mem_constellation", node.region),
+    );
+  }
+});
+
+test("constellation ordering is stable when activations arrive reordered", () => {
+  const memory = { id: "mem_ordered", regions };
+  const first = createMemoryNodeState([memory]).get(memory.id);
+  const second = createMemoryNodeState([
+    { ...memory, regions: [...regions].reverse() },
+  ]).get(memory.id);
+
+  assert.deepEqual(first, second);
 });
 
 test("omits memories without a known region anchor", () => {

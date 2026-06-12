@@ -4,7 +4,9 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { randomUUID } from "crypto";
 import { extractMemory } from "./llm.js";
+import { model } from "./llm-config.js";
 import { MemoryRequest, SummaryRequest } from "./schemas.js";
+import createLogger from "./logger.js";
 import {
   getDb,
   getMemory,
@@ -22,6 +24,8 @@ import {
   deleteMemory,
 } from "./db.js";
 
+const log = createLogger("server");
+
 const db = getDb();
 backfillRegionActivations();
 
@@ -31,6 +35,19 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static(__dirname));
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    log.info("request", {
+      method: req.method,
+      path: req.originalUrl,
+      status: res.statusCode,
+      ms: Date.now() - start,
+    });
+  });
+  next();
+});
 
 // --- Extract + Store ---
 
@@ -46,14 +63,15 @@ app.post("/api/memories", async (req, res) => {
 
   try {
     const extraction = await extractMemory(text, date);
-    const memory = storeMemory(id, text, date, extraction, process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash");
+    const memory = storeMemory(id, text, date, extraction, model);
     const entities = getEntitiesForMemory(id);
     const relationships = getRelationshipsForMemory(id);
     const regions = getRegionActivations(id);
 
+    log.info("memory stored", { id, types: extraction.types.map(t => t.type) });
     res.status(201).json({ ...memory, entities, relationships, regions, extraction });
   } catch (error) {
-    console.error("Extraction failed:", error.message);
+    log.error("extraction failed", { id, error: error.message });
     res.status(502).json({ error: "Extraction failed", detail: error.message });
   }
 });
@@ -95,6 +113,7 @@ app.get("/api/memories/:id", (req, res) => {
 
 app.delete("/api/memories", (req, res) => {
   deleteAllMemories();
+  log.info("all memories deleted");
   res.json({ ok: true });
 });
 
@@ -102,6 +121,7 @@ app.delete("/api/memories/:id", (req, res) => {
   const memory = getMemory(req.params.id);
   if (!memory) return res.status(404).json({ error: "Memory not found" });
   deleteMemory(req.params.id);
+  log.info("memory deleted", { id: req.params.id });
   res.json({ ok: true });
 });
 
@@ -112,6 +132,7 @@ app.patch("/api/memories/:id/summary", (req, res) => {
   }
 
   updateMemorySummary(req.params.id, parsed.data.summary);
+  log.info("summary updated", { id: req.params.id });
   res.json({ ok: true });
 });
 
@@ -142,11 +163,11 @@ app.post("/api/extract", async (req, res) => {
     const extraction = await extractMemory(text, ingestionDate || new Date().toISOString());
     res.json(extraction);
   } catch (error) {
-    console.error("Extraction failed:", error.message);
+    log.error("extraction failed (legacy)", { error: error.message });
     res.status(502).json({ error: "Extraction failed", detail: error.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Engram server running at http://localhost:${PORT}`);
+  log.info("server started", { port: PORT, url: `http://localhost:${PORT}` });
 });
