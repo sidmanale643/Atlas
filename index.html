@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A small interactive visualization of memories and their associations."
+    />
+    <title>Engram — Memory Atlas</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Newsreader:opsz,wght@6..72,300;6..72,500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css?v=4" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.177.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.177.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+
+    <main>
+      <section class="intro">
+        <div>
+          <p class="eyebrow">A map of remembered things</p>
+          <h1>Your memories do not live in <em>one</em> place.</h1>
+        </div>
+        <p class="intro-copy">
+          Add a moment. The atlas breaks it into people, places, time, and
+          activity, then draws the associations that make it retrievable.
+        </p>
+      </section>
+
+      <section class="workspace">
+        <aside class="memory-composer">
+          <div class="section-label">
+            <span>01</span>
+            <span>Record a memory</span>
+          </div>
+
+          <form id="memoryForm">
+            <label for="memoryInput">What happened?</label>
+            <textarea
+              id="memoryInput"
+              rows="5"
+              placeholder="I went to a cafe with Maya yesterday..."
+              required
+            ></textarea>
+
+            <div class="composer-meta">
+              <span>Natural language</span>
+              <span id="characterCount">0 / 180</span>
+            </div>
+
+            <button class="record-button" type="submit">
+              <span>Encode memory</span>
+              <span aria-hidden="true">↗</span>
+            </button>
+          </form>
+
+          <div class="legend">
+            <div class="section-label">
+              <span>KEY</span>
+              <span>Memory fragments</span>
+            </div>
+            <ul>
+              <li><span class="legend-dot event"></span>Event</li>
+              <li><span class="legend-dot person"></span>Person</li>
+              <li><span class="legend-dot place"></span>Place</li>
+              <li><span class="legend-dot time"></span>Time</li>
+              <li><span class="legend-dot activity"></span>Activity</li>
+            </ul>
+          </div>
+        </aside>
+
+        <section class="atlas-panel">
+          <div class="atlas-heading">
+            <div class="section-label">
+              <span>02</span>
+              <span>Association field</span>
+            </div>
+            <div class="atlas-count">
+              <strong id="memoryCount">0</strong>
+              <span>memories encoded</span>
+            </div>
+          </div>
+
+          <div class="brain-stage" id="brainStage">
+            <canvas
+              class="brain-model"
+              id="brainModel"
+              aria-label="Rotating three-dimensional model of a human brain"
+            ></canvas>
+
+            <div
+              class="memory-node-label"
+              id="memoryNodeLabel"
+              aria-hidden="true"
+              hidden
+            ></div>
+            <div class="empty-state" id="emptyState"></div>
+          </div>
+
+          <div class="memory-detail" id="memoryDetail" aria-live="polite">
+            <span class="detail-index">SELECT A NODE</span>
+            <p>Connected fragments will brighten when you inspect a memory.</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="memory-log">
+        <div class="memory-log-header">
+          <div class="section-label">
+            <span>03</span>
+            <span>Recent traces</span>
+          </div>
+          <button class="text-button" id="clearButton" type="button">Clear atlas</button>
+        </div>
+        <div class="memory-list" id="memoryList"></div>
+      </section>
+    </main>
+
+    <template id="memoryCardTemplate">
+      <article class="memory-card">
+        <div class="memory-card-top">
+          <span class="memory-number"></span>
+          <time></time>
+        </div>
+        <p class="memory-text"></p>
+        <div class="memory-tags"></div>
+      </article>
+    </template>
+
+    <script type="module" src="app.js?v=6"></script>
+  </body>
+</html>
