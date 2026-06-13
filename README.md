@@ -35,6 +35,10 @@ Semantic search is available over HTTP:
 curl "http://localhost:3000/api/memories/search?q=trip+with+a+friend&limit=5"
 ```
 
+Hippocampal region activations include an additive bilateral footprint. The
+`hemispheres.left` and `hemispheres.right` values are absolute atlas weights and
+sum to the parent region's `weight`; other regions omit `hemispheres`.
+
 ## MCP server
 
 Neurogram ships with a local MCP (Model Context Protocol) server that exposes
@@ -45,10 +49,11 @@ etc.) can call these tools to add, search, and manage memories.
 
 | Tool | Description |
 |------|-------------|
-| `add_memory` | Extract and store a short personal memory via LLM |
+| `add_memory` | Create, update, or deduplicate a typed memory using semantic matching |
 | `list_memories` | List recently stored memories |
 | `get_memory` | Get one memory with its entities, relationships, and region activations |
 | `search_memories` | Semantic search across memory text and summaries |
+| `get_related_memories` | Rank derived links from shared entities, relationships, and semantic similarity |
 | `find_entities` | Find people, places, concepts, etc. extracted from memories |
 | `get_entity_memories` | List every memory linked to an entity |
 | `update_memory_summary` | Replace the editable summary of a memory |
@@ -73,7 +78,7 @@ or `.cursor/mcp.json`), replacing the path with your local project path:
   "mcpServers": {
     "neurogram": {
       "command": "node",
-      "args": ["/absolute/path/to/neurogram/mcp-server.js"],
+      "args": ["/absolute/path/to/neurogram/src/mcp-server.js"],
       "env": {
         "ENGRAM_DB_PATH": "/absolute/path/to/neurogram/engram.db",
         "QDRANT_URL": "https://your-cluster-id.region.cloud-provider.cloud.qdrant.io:6333",
@@ -88,6 +93,19 @@ or `.cursor/mcp.json`), replacing the path with your local project path:
 through the `env` block above (e.g. `TOKENROUTER_API_KEY` or
 `OPENROUTER_API_KEY`). Most read-only tools work directly against SQLite;
 `search_memories` additionally requires the Qdrant Cloud credentials.
+`get_related_memories` still returns structural links if Qdrant is unavailable.
+
+Entity linking is conservative: unique canonical names and aliases can resolve
+automatically within an entity kind, while ambiguous matches remain separate
+and are surfaced as reviewable suggestions. Related-memory links are derived at
+read time rather than stored as manual edges.
+
+Before writing, `add_memory` compares the extracted input with up to five
+semantic candidates. High-confidence corrections and refinements update the
+existing memory ID and save its prior graph in revision history. Equivalent
+inputs are returned unchanged. Distinct or uncertain inputs create new
+memories. The response reports `action`, `memory`, `matchedMemoryId`,
+`confidence`, and `reason`.
 
 ### Environment variables
 

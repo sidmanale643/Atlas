@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "neurogram-mcp": "./mcp-server.js"
+    "neurogram-mcp": "./src/mcp-server.js"
   },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "mcp": "node mcp-server.js",
-    "qdrant:sync": "node sync-memory-vectors.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "mcp": "node src/mcp-server.js",
+    "qdrant:sync": "node scripts/sync-memory-vectors.js",
     "test": "node --test"
   },
   "dependencies": {

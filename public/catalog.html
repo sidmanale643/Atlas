@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Browse the memories and entities stored in Neurogram."
+    />
+    <title>Catalog · Neurogram</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Newsreader:opsz,wght@6..72,300;6..72,500&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23111617' stroke='%239ae6f5'/%3E%3Ccircle cx='18' cy='12' r='2' fill='%239ae6f5'/%3E%3Ccircle cx='12' cy='19' r='2' fill='%23e99fd1'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/css/catalog.css?v=1" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <div class="catalog-shell">
+      <aside class="catalog-sidebar">
+        <a class="catalog-brand" href="/" aria-label="Neurogram atlas">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>
+            <strong>Neurogram</strong>
+            <small>Memory atlas</small>
+          </span>
+        </a>
+
+        <nav class="catalog-nav" aria-label="Catalog">
+          <a href="/memories" data-view="memories">
+            <span>01</span>
+            <strong>Memories</strong>
+          </a>
+          <a href="/entities" data-view="entities">
+            <span>02</span>
+            <strong>Entities</strong>
+          </a>
+          <a href="/graph" data-view="graph">
+            <span>03</span>
+            <strong>Graph</strong>
+          </a>
+        </nav>
+
+        <a class="atlas-link" href="/">
+          <span>Return to atlas</span>
+          <span aria-hidden="true">↗</span>
+        </a>
+      </aside>
+
+      <main class="catalog-main">
+        <header class="catalog-header">
+          <div>
+            <p class="eyebrow">Stored knowledge · Read-only catalog</p>
+            <h1 id="catalogTitle">Memories</h1>
+          </div>
+          <p id="catalogDescription">
+            Every remembered trace, with its extracted context and associations.
+          </p>
+        </header>
+
+        <section class="catalog-panel" aria-labelledby="catalogTitle">
+          <div class="catalog-toolbar">
+            <label class="search-control">
+              <span class="visually-hidden" id="searchLabel">Search memories</span>
+              <input
+                id="catalogSearch"
+                type="search"
+                autocomplete="off"
+                placeholder="Search memories"
+              />
+            </label>
+
+            <div class="filter-controls">
+              <label>
+                <span id="filterLabel">Source</span>
+                <select id="catalogFilter"></select>
+              </label>
+              <label id="secondaryFilterControl">
+                <span id="secondaryFilterLabel">Type</span>
+                <select id="secondaryFilter"></select>
+              </label>
+              <label>
+                <span>Rows</span>
+                <select id="pageSize">
+                  <option value="10">10</option>
+                  <option value="25" selected>25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="catalog-summary">
+            <p id="catalogCount" aria-live="polite">Loading…</p>
+            <button id="clearFilters" type="button" hidden>Clear filters</button>
+          </div>
+
+          <div class="table-frame">
+            <table id="catalogTable">
+              <caption class="visually-hidden" id="tableCaption">
+                Stored memories
+              </caption>
+              <thead id="catalogHead"></thead>
+              <tbody id="catalogBody"></tbody>
+            </table>
+            <div class="catalog-state" id="catalogState" role="status">
+              Loading catalog…
+            </div>
+          </div>
+
+          <footer class="catalog-pagination">
+            <p id="pageStatus"></p>
+            <div>
+              <button id="previousPage" type="button">Previous</button>
+              <button id="nextPage" type="button">Next</button>
+            </div>
+          </footer>
+        </section>
+
+        <div
+          class="comparison-bar"
+          id="comparisonBar"
+          aria-live="polite"
+          hidden
+        >
+          <div>
+            <strong id="comparisonCount">0 of 2 selected</strong>
+            <span id="comparisonNames">Choose two memories to compare</span>
+          </div>
+          <div class="comparison-actions">
+            <button id="clearComparison" type="button">Clear</button>
+            <button id="compareMemories" type="button" disabled>
+              Compare memories
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="/js/catalog.js?v=2"></script>
+  </body>
+</html>
