@@ -1,4 +1,4 @@
-# 3D Memory Atlas Plan
+# Neurogram 3D Memory Atlas Plan
 
 <!-- # STATUS 2026-06-12: Structured extraction and SQLite persistence work. The memory graph is still a 2D SVG overlay, so memories are not embedded in the Three.js brain and brain regions are not highlighted from each memory's data. -->
 <!-- # STATUS LABELS: IMPLEMENTED means wired into the current app. PARTIAL means only part of the described flow exists. REMAINING means no working end-to-end implementation was found. -->

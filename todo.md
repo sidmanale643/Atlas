@@ -29,7 +29,7 @@ For the MVP:
 - show region activation with a glow, pulse, or translucent marker around that
   anchor;
 - place memory nodes near their highest-weight anchor;
-- connect a selected memory to its other active region anchors.
+- connect one canonical memory core to every active region anchor.
 
 Do not attempt per-polygon brain-surface coloring with the current OBJ. Exact
 surface highlighting requires a segmented model and belongs in the later model
@@ -44,7 +44,7 @@ The first 3D milestone is complete when:
 3. Each memory appears as a selectable Three.js node near its dominant region.
 4. The same memory appears in the same position after every reload.
 5. Selecting a memory highlights all associated regions according to weight.
-6. Lines connect the selected memory to its secondary regions.
+6. Lines connect the selected memory core to every participating region.
 7. The detail panel explains each activated region and its weight.
 8. The old SVG memory graph is removed. ✓
 
@@ -213,19 +213,19 @@ Files: `app.js`, `index.html`, `styles.css`
 - [x] Create a Three.js group dedicated to memory nodes.
 - [x] Start with normal meshes for correctness and selection.
 - [x] Use one sphere or compact marker per memory.
-- [x] Color the node by dominant memory type.
+- [x] Render every memory core in one neutral color.
 - [x] Scale the node by salience within a restrained minimum and maximum.
 - [x] Store the memory ID in `mesh.userData`.
 - [ ] Add a small secondary-type ring only after basic nodes work.
 - [x] Keep labels hidden by default.
-- [x] Show an HTML or CSS2D label for the selected memory.
+- [x] Show screen-positioned labels for every active region on selection.
 - [ ] Consider `InstancedMesh` only after the 100-memory check shows normal
       meshes are too slow.
 
 Verify:
 
 - [x] Every loaded memory creates exactly one 3D node.
-- [x] Node color matches its dominant extracted type.
+- [x] Region colors appear only on activation fields and contribution paths.
 - [x] Node size reflects salience without becoming unreadably small or large.
 - [x] Nodes rotate with the brain coordinate system.
 
@@ -258,10 +258,10 @@ File: `app.js`
 
 - [x] Create a Three.js group for activation connections.
 - [x] Clear this group whenever selection changes.
-- [x] Draw lines only for the selected memory.
-- [x] Connect the memory node to every region above the display threshold.
+- [x] Draw lines only for the hovered or selected memory.
+- [x] Connect the memory core to every stored positive region activation.
 - [x] Vary line opacity or width by activation weight.
-- [x] Keep secondary-region lines less prominent than the dominant region.
+- [x] Focus the dominant-region path by default and retain every other path.
 - [x] Render lines inside the same transformed coordinate system as the brain
       and memory nodes.
 - [x] Do not render all memories' connections at once.
@@ -284,6 +284,9 @@ Files: `app.js`, `styles.css`
 - [x] Include emotion contribution when applicable.
 - [x] Keep extraction confidence separate from region weight.
 - [x] Show a clear message if an old memory has no region data.
+- [x] Explain each region's atlas role.
+- [x] State that activations are mapped rather than measured.
+- [x] Synchronize 3D markers, screen labels, and detail rows.
 
 Verify:
 
@@ -336,20 +339,20 @@ Verify:
 Files: `index.html`, `app.js`, `styles.css`, and `server.js` only if server-side
 queries become necessary.
 
-- [ ] Add text search over raw text, summary, and entity names.
+- [x] Add text search over raw text, summary, and entity names.
 - [ ] Add a memory-type filter.
 - [ ] Add an emotion filter only when at least one memory has emotions.
 - [ ] Add a brain-region filter using stored activations.
-- [ ] Dim or hide nonmatching 3D nodes consistently.
-- [ ] Keep the selected memory visible or clear selection when it is filtered
+- [x] Dim or hide nonmatching 3D nodes consistently.
+- [x] Keep the selected memory visible or clear selection when it is filtered
       out.
-- [ ] Add a reset-filters action.
+- [x] Add a reset-filters action.
 
 Verify:
 
-- [ ] Search finds raw text and canonical entity names.
+- [x] Search finds raw text and canonical entity names.
 - [ ] Type and region filters can be combined.
-- [ ] Reset returns every memory node.
+- [x] Reset returns every memory node.
 
 ## 14. Add entity and related-memory traversal
 
@@ -426,7 +429,11 @@ Do these only after the 3D MVP and traversal checks pass.
 7. Add embeddings and later work only after the simpler graph paths work.
 
 
-Add reference to skills like cycling reading
+Add reference to skills like cycling reading : DONE
 memory decay
 memory confusion testing
-mcp
+mcp : DONE (verify)
+add profile.md
+add semantic (hybrid search) with turbovec and sentence transformers
+optionally use ML for entity extraction
+optional clustering
