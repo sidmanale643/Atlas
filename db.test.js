@@ -12,7 +12,9 @@ const {
   closeDb,
   deleteMemory,
   getDb,
+  getEntitiesForMemory,
   getRegionActivations,
+  getRelationshipsForMemory,
   saveExtraction,
   saveRegionActivations,
   storeMemory,
@@ -133,4 +135,59 @@ test("deleting a memory cascades to its region activations", () => {
     .prepare("SELECT COUNT(*) AS count FROM region_activations WHERE memory_id = ?")
     .get("mem_store").count;
   assert.equal(count, 0);
+});
+
+test("relationship endpoints reuse entities by normalized mention and canonical name", () => {
+  storeMemory(
+    "mem_entity_aliases",
+    "Maya visited the museum.",
+    "2026-06-12T00:00:00.000Z",
+    extraction({
+      entities: [
+        {
+          mention: "Maya",
+          canonicalName: "Maya Patel",
+          kind: "person",
+          confidence: 0.99,
+        },
+        {
+          mention: "the museum",
+          canonicalName: "City Museum",
+          kind: "place",
+          confidence: 0.96,
+        },
+      ],
+      relationships: [
+        {
+          subject: "  MAYA  ",
+          predicate: "visited",
+          object: "city museum",
+          confidence: 0.94,
+          evidence: "Maya visited the museum",
+        },
+      ],
+    }),
+    "test-model",
+  );
+
+  const entities = getEntitiesForMemory("mem_entity_aliases");
+  const relationship = getRelationshipsForMemory("mem_entity_aliases")[0];
+  const maya = entities.find((entity) => entity.canonical_name === "Maya Patel");
+  const museum = entities.find(
+    (entity) => entity.canonical_name === "City Museum",
+  );
+
+  assert.equal(relationship.source_entity_id, maya.id);
+  assert.equal(relationship.target_entity_id, museum.id);
+  assert.equal(
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM entities
+         WHERE kind = 'concept'
+           AND lower(trim(canonical_name)) IN ('maya', 'city museum')`,
+      )
+      .get().count,
+    0,
+  );
 });

@@ -1,13 +1,21 @@
 {
-  "name": "engram-memory-atlas",
+  "name": "neurogram",
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "neurogram-mcp": "./mcp-server.js"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "mcp": "node mcp-server.js",
+    "qdrant:sync": "node sync-memory-vectors.js",
     "test": "node --test"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@qdrant/js-client-rest": "^1.18.0",
     "better-sqlite3": "^12.10.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

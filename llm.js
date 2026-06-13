@@ -98,7 +98,7 @@ export async function extractMemory(text, ingestionDate) {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": "http://localhost:3000",
-      "X-Title": "Engram Memory Atlas",
+      "X-Title": "Neurogram",
     },
     body: JSON.stringify(requestBody),
   });

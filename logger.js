@@ -1,6 +1,7 @@
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 
 const activeLevel = LEVELS[process.env.LOG_LEVEL || "info"] ?? LEVELS.info;
+const useStderr = process.env.LOG_STREAM === "stderr";
 
 function timestamp() {
   return new Date().toISOString();
@@ -15,18 +16,34 @@ function format(level, ctx, msg, data) {
 }
 
 function createLogger(context) {
+  const write = (method, message) => {
+    if (useStderr) {
+      console.error(message);
+      return;
+    }
+    console[method](message);
+  };
+
   return {
     debug(msg, data) {
-      if (activeLevel <= LEVELS.debug) console.debug(format("debug", context, msg, data));
+      if (activeLevel <= LEVELS.debug) {
+        write("debug", format("debug", context, msg, data));
+      }
     },
     info(msg, data) {
-      if (activeLevel <= LEVELS.info) console.info(format("info", context, msg, data));
+      if (activeLevel <= LEVELS.info) {
+        write("info", format("info", context, msg, data));
+      }
     },
     warn(msg, data) {
-      if (activeLevel <= LEVELS.warn) console.warn(format("warn", context, msg, data));
+      if (activeLevel <= LEVELS.warn) {
+        write("warn", format("warn", context, msg, data));
+      }
     },
     error(msg, data) {
-      if (activeLevel <= LEVELS.error) console.error(format("error", context, msg, data));
+      if (activeLevel <= LEVELS.error) {
+        write("error", format("error", context, msg, data));
+      }
     },
   };
 }

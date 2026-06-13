@@ -1,12 +1,19 @@
 import "dotenv/config";
 import express from "express";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { dirname, join, resolve } from "path";
+import { pathToFileURL } from "url";
 import { randomUUID } from "crypto";
 import { extractMemory } from "./llm.js";
 import { model } from "./llm-config.js";
 import { MemoryRequest, SummaryRequest } from "./schemas.js";
 import createLogger from "./logger.js";
+import {
+  deleteAllMemoryVectors,
+  deleteMemoryVector,
+  indexMemoryVector,
+  searchMemoryVectors,
+} from "./vector-store.js";
 import {
   getDb,
   getMemory,
@@ -14,9 +21,11 @@ import {
   updateMemorySummary,
   storeMemory,
   getLatestExtraction,
+  getEntity,
   getEntitiesForMemory,
   getMemoriesForEntity,
   getRelationshipsForMemory,
+  getRelationshipsForEntity,
   getRegionActivations,
   backfillRegionActivations,
   findEntities,
@@ -25,149 +34,314 @@ import {
 } from "./db.js";
 
 const log = createLogger("server");
-
-const db = getDb();
-backfillRegionActivations();
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-app.use(express.static(__dirname));
+const defaultDependencies = {
+  backfillRegionActivations,
+  deleteAllMemoryVectors,
+  deleteAllMemories,
+  deleteMemoryVector,
+  deleteMemory,
+  extractMemory,
+  findEntities,
+  getDb,
+  getEntitiesForMemory,
+  getEntity,
+  getLatestExtraction,
+  getMemories,
+  getMemoriesForEntity,
+  getMemory,
+  getRegionActivations,
+  getRelationshipsForEntity,
+  getRelationshipsForMemory,
+  model,
+  indexMemoryVector,
+  searchMemoryVectors,
+  storeMemory,
+  updateMemorySummary,
+};
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on("finish", () => {
-    log.info("request", {
-      method: req.method,
-      path: req.originalUrl,
-      status: res.statusCode,
-      ms: Date.now() - start,
+export function createNeurogramApp(overrides = {}) {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  const app = express();
+
+  dependencies.getDb();
+  dependencies.backfillRegionActivations();
+  app.use(express.json());
+  app.use(express.static(__dirname));
+
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on("finish", () => {
+      log.info("request", {
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        ms: Date.now() - start,
+      });
     });
+    next();
   });
-  next();
-});
 
-// --- Extract + Store ---
+  app.post("/api/memories", async (req, res) => {
+    const parsed = MemoryRequest.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues });
+    }
 
-app.post("/api/memories", async (req, res) => {
-  const parsed = MemoryRequest.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.issues });
-  }
+    const { text, ingestionDate } = parsed.data;
+    const id = `mem_${randomUUID().slice(0, 8)}`;
+    const date = ingestionDate || new Date().toISOString();
 
-  const { text, ingestionDate } = parsed.data;
-  const id = `mem_${randomUUID().slice(0, 8)}`;
-  const date = ingestionDate || new Date().toISOString();
+    try {
+      const extraction = await dependencies.extractMemory(text, date);
+      const memory = dependencies.storeMemory(
+        id,
+        text,
+        date,
+        extraction,
+        dependencies.model,
+        "ui",
+      );
+      await syncVectorIndex(
+        () => dependencies.indexMemoryVector(memory),
+        { action: "index", id },
+      );
+      const response = serializeMemory(memory, dependencies, {
+        extraction,
+        includeRelationships: true,
+      });
 
-  try {
-    const extraction = await extractMemory(text, date);
-    const memory = storeMemory(id, text, date, extraction, model);
-    const entities = getEntitiesForMemory(id);
-    const relationships = getRelationshipsForMemory(id);
-    const regions = getRegionActivations(id);
-
-    log.info("memory stored", { id, types: extraction.types.map(t => t.type) });
-    res.status(201).json({ ...memory, entities, relationships, regions, extraction });
-  } catch (error) {
-    log.error("extraction failed", { id, error: error.message });
-    res.status(502).json({ error: "Extraction failed", detail: error.message });
-  }
-});
-
-// --- Memory Queries ---
-
-app.get("/api/memories", (req, res) => {
-  const limit = parseInt(req.query.limit) || 100;
-  const offset = parseInt(req.query.offset) || 0;
-  const rows = getMemories({ limit, offset });
-  const memories = rows.map((row) => {
-    const extraction = db
-      .prepare(
-        "SELECT extraction_json FROM memory_extractions WHERE memory_id = ? ORDER BY created_at DESC LIMIT 1"
-      )
-      .get(row.id);
-    return {
-      ...row,
-      extraction: extraction
-        ? { extraction_json: JSON.parse(extraction.extraction_json) }
-        : null,
-      regions: getRegionActivations(row.id),
-    };
+      log.info("memory stored", {
+        id,
+        types: extraction.types.map((item) => item.type),
+      });
+      res.status(201).json(response);
+    } catch (error) {
+      log.error("extraction failed", { id, error: error.message });
+      res.status(502).json({
+        error: "Extraction failed",
+        detail: error.message,
+      });
+    }
   });
-  res.json(memories);
-});
 
-app.get("/api/memories/:id", (req, res) => {
-  const memory = getMemory(req.params.id);
-  if (!memory) return res.status(404).json({ error: "Memory not found" });
+  app.get("/api/memories", (req, res) => {
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
+    const source = req.query.source || undefined;
+    const rows = dependencies.getMemories({ limit, offset, source });
+    res.json(rows.map((row) => serializeMemory(row, dependencies)));
+  });
 
-  const extraction = getLatestExtraction(req.params.id);
-  const entities = getEntitiesForMemory(req.params.id);
-  const relationships = getRelationshipsForMemory(req.params.id);
-  const regions = getRegionActivations(req.params.id);
+  app.get("/api/memories/search", async (req, res) => {
+    const query = String(req.query.q || "").trim();
+    if (!query) {
+      return res.status(400).json({ error: "q query param required" });
+    }
 
-  res.json({ ...memory, extraction, entities, relationships, regions });
-});
+    const limit = clampInteger(req.query.limit, 10, 1, 100);
+    const scoreThreshold = parseOptionalNumber(req.query.scoreThreshold);
 
-app.delete("/api/memories", (req, res) => {
-  deleteAllMemories();
-  log.info("all memories deleted");
-  res.json({ ok: true });
-});
+    try {
+      const hits = await dependencies.searchMemoryVectors(query, {
+        limit,
+        scoreThreshold,
+      });
+      const memories = hits.flatMap(({ id, score }) => {
+        const memory = dependencies.getMemory(id);
+        return memory
+          ? [{ ...serializeMemory(memory, dependencies), similarity: score }]
+          : [];
+      });
+      res.json({ query, memories });
+    } catch (error) {
+      log.error("vector search failed", { error: error.message });
+      res.status(503).json({
+        error: "Vector search unavailable",
+        detail: error.message,
+      });
+    }
+  });
 
-app.delete("/api/memories/:id", (req, res) => {
-  const memory = getMemory(req.params.id);
-  if (!memory) return res.status(404).json({ error: "Memory not found" });
-  deleteMemory(req.params.id);
-  log.info("memory deleted", { id: req.params.id });
-  res.json({ ok: true });
-});
+  app.get("/api/memories/:id", (req, res) => {
+    const memory = dependencies.getMemory(req.params.id);
+    if (!memory) return res.status(404).json({ error: "Memory not found" });
 
-app.patch("/api/memories/:id/summary", (req, res) => {
-  const parsed = SummaryRequest.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.issues });
-  }
+    res.json(
+      serializeMemory(memory, dependencies, {
+        includeRelationships: true,
+      }),
+    );
+  });
 
-  updateMemorySummary(req.params.id, parsed.data.summary);
-  log.info("summary updated", { id: req.params.id });
-  res.json({ ok: true });
-});
+  app.delete("/api/memories", async (_req, res) => {
+    dependencies.deleteAllMemories();
+    await syncVectorIndex(
+      () => dependencies.deleteAllMemoryVectors(),
+      { action: "delete-all" },
+    );
+    log.info("all memories deleted");
+    res.json({ ok: true });
+  });
 
-// --- Entity Queries ---
+  app.delete("/api/memories/:id", async (req, res) => {
+    const memory = dependencies.getMemory(req.params.id);
+    if (!memory) return res.status(404).json({ error: "Memory not found" });
+    dependencies.deleteMemory(req.params.id);
+    await syncVectorIndex(
+      () => dependencies.deleteMemoryVector(req.params.id),
+      { action: "delete", id: req.params.id },
+    );
+    log.info("memory deleted", { id: req.params.id });
+    res.json({ ok: true });
+  });
 
-app.get("/api/entities", (req, res) => {
-  const q = req.query.q;
-  if (!q) return res.status(400).json({ error: "q query param required" });
-  res.json(findEntities(q));
-});
+  app.patch("/api/memories/:id/summary", async (req, res) => {
+    const parsed = SummaryRequest.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues });
+    }
 
-app.get("/api/entities/:id/memories", (req, res) => {
-  const memories = getMemoriesForEntity(parseInt(req.params.id));
-  res.json(memories);
-});
+    dependencies.updateMemorySummary(req.params.id, parsed.data.summary);
+    const memory = dependencies.getMemory(req.params.id);
+    if (memory) {
+      await syncVectorIndex(
+        () => dependencies.indexMemoryVector(memory),
+        { action: "reindex", id: req.params.id },
+      );
+    }
+    log.info("summary updated", { id: req.params.id });
+    res.json({ ok: true });
+  });
 
-// --- Legacy extract endpoint ---
+  app.get("/api/entities", (req, res) => {
+    const q = req.query.q;
+    if (!q) return res.status(400).json({ error: "q query param required" });
+    res.json(dependencies.findEntities(q));
+  });
 
-app.post("/api/extract", async (req, res) => {
-  const parsed = MemoryRequest.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.issues });
-  }
+  app.get("/api/entities/:id/graph", (req, res) => {
+    const entityId = Number.parseInt(req.params.id, 10);
+    const entity = Number.isInteger(entityId)
+      ? dependencies.getEntity(entityId)
+      : null;
+    if (!entity) return res.status(404).json({ error: "Entity not found" });
 
-  const { text, ingestionDate } = parsed.data;
+    const memories = dependencies
+      .getMemoriesForEntity(entityId)
+      .map((memory) => serializeMemory(memory, dependencies));
+    const relationships = dependencies
+      .getRelationshipsForEntity(entityId)
+      .map(serializeRelationship);
+    res.json({ entity, memories, relationships });
+  });
 
+  app.get("/api/entities/:id/memories", (req, res) => {
+    const memories = dependencies.getMemoriesForEntity(
+      Number.parseInt(req.params.id, 10),
+    );
+    res.json(memories);
+  });
+
+  app.post("/api/extract", async (req, res) => {
+    const parsed = MemoryRequest.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues });
+    }
+
+    const { text, ingestionDate } = parsed.data;
+
+    try {
+      const extraction = await dependencies.extractMemory(
+        text,
+        ingestionDate || new Date().toISOString(),
+      );
+      res.json(extraction);
+    } catch (error) {
+      log.error("extraction failed (legacy)", { error: error.message });
+      res.status(502).json({
+        error: "Extraction failed",
+        detail: error.message,
+      });
+    }
+  });
+
+  return app;
+}
+
+async function syncVectorIndex(operation, context) {
   try {
-    const extraction = await extractMemory(text, ingestionDate || new Date().toISOString());
-    res.json(extraction);
+    await operation();
+    return true;
   } catch (error) {
-    log.error("extraction failed (legacy)", { error: error.message });
-    res.status(502).json({ error: "Extraction failed", detail: error.message });
+    log.warn("vector index sync failed", { ...context, error: error.message });
+    return false;
   }
-});
+}
 
-app.listen(PORT, () => {
-  log.info("server started", { port: PORT, url: `http://localhost:${PORT}` });
-});
+function clampInteger(value, fallback, minimum, maximum) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(Math.max(parsed, minimum), maximum);
+}
+
+function parseOptionalNumber(value) {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function serializeMemory(
+  memory,
+  dependencies,
+  { extraction, includeRelationships = false } = {},
+) {
+  return {
+    ...memory,
+    extraction:
+      extraction === undefined
+        ? dependencies.getLatestExtraction(memory.id)
+        : extraction,
+    entities: dependencies.getEntitiesForMemory(memory.id),
+    relationships: includeRelationships
+      ? dependencies.getRelationshipsForMemory(memory.id)
+      : [],
+    regions: dependencies.getRegionActivations(memory.id),
+  };
+}
+
+function serializeRelationship(relationship) {
+  return {
+    id: relationship.id,
+    predicate: relationship.predicate,
+    memory_id: relationship.memory_id,
+    confidence: relationship.confidence,
+    evidence: relationship.evidence,
+    created_at: relationship.created_at,
+    source: {
+      id: relationship.source_entity_id,
+      canonical_name: relationship.source_name,
+      kind: relationship.source_kind,
+    },
+    target: {
+      id: relationship.target_entity_id,
+      canonical_name: relationship.target_name,
+      kind: relationship.target_kind,
+    },
+  };
+}
+
+export function startNeurogramServer(port = PORT) {
+  const app = createNeurogramApp();
+  return app.listen(port, () => {
+    log.info("server started", { port, url: `http://localhost:${port}` });
+  });
+}
+
+const isMainModule =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+
+if (isMainModule) startNeurogramServer();

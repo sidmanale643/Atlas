@@ -28,6 +28,7 @@ function initSchema() {
       raw_text TEXT NOT NULL,
       ingestion_date TEXT NOT NULL,
       summary TEXT,
+      source TEXT NOT NULL DEFAULT 'ui',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -100,17 +101,26 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_relationships_memory ON relationships(memory_id);
     CREATE INDEX IF NOT EXISTS idx_region_activations_memory ON region_activations(memory_id);
   `);
+
+  const hasSource = db.prepare("PRAGMA table_info(memories)").all().some((c) => c.name === "source");
+  if (!hasSource) {
+    db.exec("ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'ui'");
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source);
+  `);
 }
 
 // --- Memory CRUD ---
 
-export function createMemory(id, rawText, ingestionDate, summary = null) {
+export function createMemory(id, rawText, ingestionDate, summary = null, source = "ui") {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO memories (id, raw_text, ingestion_date, summary)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO memories (id, raw_text, ingestion_date, summary, source)
+    VALUES (?, ?, ?, ?, ?)
   `);
-  stmt.run(id, rawText, ingestionDate, summary);
+  stmt.run(id, rawText, ingestionDate, summary, source);
   return getMemory(id);
 }
 
@@ -119,11 +129,30 @@ export function getMemory(id) {
   return db.prepare("SELECT * FROM memories WHERE id = ?").get(id);
 }
 
-export function getMemories({ limit = 100, offset = 0 } = {}) {
+export function getMemories({ limit = 100, offset = 0, source } = {}) {
   const db = getDb();
+  if (source) {
+    return db
+      .prepare("SELECT * FROM memories WHERE source = ? ORDER BY created_at DESC LIMIT ? OFFSET ?")
+      .all(source, limit, offset);
+  }
   return db
     .prepare("SELECT * FROM memories ORDER BY created_at DESC LIMIT ? OFFSET ?")
     .all(limit, offset);
+}
+
+export function searchMemories(query, { limit = 20 } = {}) {
+  const db = getDb();
+  const pattern = `%${query}%`;
+  return db
+    .prepare(
+      `SELECT *
+       FROM memories
+       WHERE raw_text LIKE ? OR summary LIKE ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+    )
+    .all(pattern, pattern, limit);
 }
 
 export function updateMemorySummary(id, summary) {
@@ -271,7 +300,8 @@ export function getRelationshipsForEntity(entityId) {
        FROM relationships r
        JOIN entities se ON se.id = r.source_entity_id
        JOIN entities te ON te.id = r.target_entity_id
-       WHERE r.source_entity_id = ? OR r.target_entity_id = ?`
+       WHERE r.source_entity_id = ? OR r.target_entity_id = ?
+       ORDER BY r.created_at DESC, r.id DESC`
     )
     .all(entityId, entityId);
 }
@@ -353,10 +383,10 @@ export function backfillRegionActivations() {
 
 // --- Full pipeline: extract + store ---
 
-export function storeMemory(id, rawText, ingestionDate, extraction, model) {
+export function storeMemory(id, rawText, ingestionDate, extraction, model, source = "ui") {
   const db = getDb();
   const storeAll = db.transaction(() => {
-    createMemory(id, rawText, ingestionDate, extraction.summary);
+    createMemory(id, rawText, ingestionDate, extraction.summary, source);
     saveExtraction(id, extraction, model);
     saveRegionActivations(
       id,
@@ -368,15 +398,22 @@ export function storeMemory(id, rawText, ingestionDate, extraction, model) {
     for (const ent of extraction.entities || []) {
       const name = ent.canonicalName || ent.mention;
       const entityId = upsertEntity(name, ent.kind);
-      entityIds.set(name, entityId);
+      for (const alias of [name, ent.mention, ent.canonicalName]) {
+        const key = normalizeEntityKey(alias);
+        if (key) entityIds.set(key, entityId);
+      }
       linkMemoryToEntity(id, entityId, ent.mention, null, ent.confidence);
     }
 
     for (const rel of extraction.relationships || []) {
-      const srcName = rel.subject === "self" ? rel.subject : rel.subject;
-      const tgtName = rel.object;
-      const srcId = entityIds.get(srcName) || upsertEntity(srcName, "concept");
-      const tgtId = entityIds.get(tgtName) || upsertEntity(tgtName, "concept");
+      const srcName = String(rel.subject || "").trim();
+      const tgtName = String(rel.object || "").trim();
+      const srcId =
+        entityIds.get(normalizeEntityKey(srcName)) ||
+        upsertEntity(srcName, "concept");
+      const tgtId =
+        entityIds.get(normalizeEntityKey(tgtName)) ||
+        upsertEntity(tgtName, "concept");
       addRelationship(srcId, tgtId, rel.predicate, id, rel.confidence, rel.evidence);
     }
 
@@ -384,6 +421,13 @@ export function storeMemory(id, rawText, ingestionDate, extraction, model) {
   });
 
   return storeAll();
+}
+
+function normalizeEntityKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase();
 }
 
 // --- Delete ---
