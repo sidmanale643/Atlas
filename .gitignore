@@ -4,3 +4,6 @@ node_modules/
 engram.db
 engram.db-shm
 engram.db-wal
+*.md
+*.test.js
+tests/
