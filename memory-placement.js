@@ -78,17 +78,19 @@ export function createMemoryNodeState(memories) {
     const dominantRegion = activations[0]?.region;
     if (!dominantRegion) continue;
 
-    const nodes = activations.map(({ region, weight }, index) => ({
+    const normalizedActivations = activations.map(({ region, weight }, index) => ({
       region,
       weight,
-      isPrimary: index === 0,
-      position: calculateRegionPosition(memory.id, region),
+      isDominant: index === 0,
     }));
 
     state.set(memory.id, {
-      dominantRegion,
-      position: nodes[0].position,
-      nodes,
+      core: {
+        region: dominantRegion,
+        weight: normalizedActivations[0].weight,
+        position: calculateMemoryPosition(memory.id, activations),
+      },
+      activations: normalizedActivations,
     });
   }
 

@@ -5,16 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="A small interactive visualization of memories and their associations."
+      content="Neurogram is an interactive visualization of memories and their neural associations."
     />
-    <title>Engram — Memory Atlas</title>
+    <title>Neurogram</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Newsreader:opsz,wght@6..72,300;6..72,500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="styles.css?v=6" />
+    <link rel="stylesheet" href="styles.css?v=11" />
     <script type="importmap">
       {
         "imports": {
@@ -30,8 +30,8 @@
     <main>
       <section class="intro">
         <div>
-          <p class="eyebrow">A map of remembered things</p>
-          <h1>Your memories do not live in <em>one</em> place.</h1>
+          <p class="eyebrow">Neurogram · A map of remembered things</p>
+          <h1>Neurons that fire together wire together</h1>
         </div>
         <p class="intro-copy">
           Add a moment. The atlas breaks it into people, places, time, and
@@ -102,18 +102,77 @@
               <span>02</span>
               <span>Association field</span>
             </div>
-            <div class="atlas-actions">
-              <button
-                class="text-button"
-                id="clearSelectionButton"
-                type="button"
+            <div class="atlas-controls">
+              <div class="memory-search">
+                <label class="visually-hidden" for="memorySearch">
+                  Search memories
+                </label>
+                <input
+                  id="memorySearch"
+                  type="search"
+                  placeholder="Search memories by meaning"
+                  autocomplete="off"
+                  aria-describedby="memorySearchStatus"
+                />
+                <button
+                  class="text-button"
+                  id="resetFiltersButton"
+                  type="button"
+                  hidden
+                >
+                  Reset
+                </button>
+              </div>
+              <p
+                class="memory-search-status"
+                id="memorySearchStatus"
+                role="status"
+                aria-live="polite"
                 hidden
-              >
-                Clear selection
-              </button>
-              <div class="atlas-count">
-                <strong id="memoryCount">0</strong>
-                <span>memories encoded</span>
+              ></p>
+              <div class="atlas-actions">
+                <div
+                  class="source-filter"
+                  role="group"
+                  aria-label="Filter memories by source"
+                >
+                  <button
+                    class="filter-button active"
+                    data-filter="all"
+                    type="button"
+                    aria-pressed="true"
+                  >
+                    All
+                  </button>
+                  <button
+                    class="filter-button"
+                    data-filter="ui"
+                    type="button"
+                    aria-pressed="false"
+                  >
+                    User
+                  </button>
+                  <button
+                    class="filter-button"
+                    data-filter="mcp"
+                    type="button"
+                    aria-pressed="false"
+                  >
+                    Agent
+                  </button>
+                </div>
+                <button
+                  class="text-button"
+                  id="clearSelectionButton"
+                  type="button"
+                  hidden
+                >
+                  Clear selection
+                </button>
+                <div class="atlas-count">
+                  <strong id="memoryCount">0</strong>
+                  <span>memories shown</span>
+                </div>
               </div>
             </div>
           </div>
@@ -130,6 +189,53 @@
               aria-label="Rotating three-dimensional model of a human brain"
             ></canvas>
 
+            <ul class="atlas-visual-key" aria-label="Atlas visual key">
+              <li>
+                <i class="key-memory" aria-hidden="true"></i>
+                <span>Memory</span>
+              </li>
+              <li>
+                <i class="key-region" aria-hidden="true"></i>
+                <span>Region activation</span>
+              </li>
+              <li>
+                <i class="key-path" aria-hidden="true"></i>
+                <span>Contribution path</span>
+              </li>
+              <li>
+                <i class="key-entity key-entity-person" aria-hidden="true"></i>
+                <span>Person</span>
+              </li>
+              <li>
+                <i class="key-entity key-entity-place" aria-hidden="true"></i>
+                <span>Place</span>
+              </li>
+              <li>
+                <i class="key-entity key-entity-object" aria-hidden="true"></i>
+                <span>Object</span>
+              </li>
+              <li>
+                <i class="key-entity key-entity-concept" aria-hidden="true"></i>
+                <span>Concept</span>
+              </li>
+              <li>
+                <i
+                  class="key-entity key-entity-organization"
+                  aria-hidden="true"
+                ></i>
+                <span>Organization</span>
+              </li>
+              <li>
+                <i class="key-relationship" aria-hidden="true"></i>
+                <span>Relationship</span>
+              </li>
+            </ul>
+            <div
+              class="region-labels"
+              id="regionLabels"
+              aria-label="Active brain regions"
+              hidden
+            ></div>
             <div
               class="memory-hover-panel"
               id="memoryHoverPanel"
@@ -140,8 +246,11 @@
           </div>
 
           <div class="memory-detail" id="memoryDetail" aria-live="polite">
-            <span class="detail-index">SELECT A NODE</span>
-            <p>Connected fragments will brighten when you inspect a memory.</p>
+            <span class="detail-index">SELECT A MEMORY</span>
+            <p>
+              Its participating brain regions will appear as activation fields
+              and paths.
+            </p>
           </div>
         </section>
       </section>
@@ -169,6 +278,6 @@
       </article>
     </template>
 
-    <script type="module" src="app.js?v=11"></script>
+    <script type="module" src="app.js?v=17"></script>
   </body>
 </html>

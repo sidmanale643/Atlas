@@ -1,23 +1,35 @@
 import * as THREE from "three";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import {
+  ENTITY_KIND_COLORS,
+  buildEntitySpokes,
+  calculateEntityHubPosition,
+  calculateRelationshipPreviewPosition,
+  filterEntityGraphMemories,
+  getRelationshipCounterpart,
+  getRelationshipDirection,
+  pushNavigation,
+  restoreNavigation,
+} from "./entity-lens.js";
 import { createMemoryNodeState } from "./memory-placement.js";
+import { filterMemoriesForSearch } from "./memory-search.js";
 import { REGION_ANCHORS } from "./region-anchors.js";
 import { getRegionContributions } from "./region-mapper.js";
-import { CORE_BRAIN_REGIONS } from "./brain-regions.js";
 
 const MAX_LENGTH = 180;
 const SHOW_REGION_ANCHORS =
   new URLSearchParams(window.location.search).get("debugRegions") === "1";
 const MIN_MEMORY_NODE_RADIUS = 0.09;
 const MAX_MEMORY_NODE_RADIUS = 0.16;
-const MIN_SUPPORT_NODE_RADIUS = 0.045;
-const MAX_SUPPORT_NODE_RADIUS = 0.085;
 const MIN_CONNECTION_RADIUS = 0.006;
 const MAX_CONNECTION_RADIUS = 0.032;
 const CONNECTION_SEGMENTS = 36;
 const FLOW_PARTICLE_COUNT = 3;
 const DEFAULT_MEMORY_COLOR = "#f4d8b4";
+const REGION_LABEL_MIN_GAP = 36;
+const ENTITY_HUB_RADIUS = 0.2;
+const ENTITY_PREVIEW_RADIUS = 0.14;
 const MEMORY_TYPES = new Set([
   "episodic",
   "semantic",
@@ -38,6 +50,8 @@ const DEEP_BRAIN_REGIONS = new Set([
   "amygdala",
   "basalGanglia",
 ]);
+const SEARCH_DEBOUNCE_MS = 300;
+const SEMANTIC_SCORE_THRESHOLD = 0.25;
 
 const form = document.querySelector("#memoryForm");
 const input = document.querySelector("#memoryInput");
@@ -53,18 +67,28 @@ const brainStage = document.querySelector("#brainStage");
 const brainCanvas = document.querySelector("#brainModel");
 const memoryHoverPanel = document.querySelector("#memoryHoverPanel");
 const clearSelectionButton = document.querySelector("#clearSelectionButton");
+const regionLabels = document.querySelector("#regionLabels");
+const searchInput = document.querySelector("#memorySearch");
+const searchStatus = document.querySelector("#memorySearchStatus");
+const resetFiltersButton = document.querySelector("#resetFiltersButton");
 
 let memories = [];
 let selectedMemoryId = null;
 let hoveredMemoryId = null;
+let selectedRegion = null;
+let hoveredRegion = null;
 let extracting = false;
 let regionMarkers = new Map();
+let regionMarkerHitTargets = [];
+let regionLabelButtons = new Map();
 let hasActiveRegionMarkers = false;
 let memoryNodeState = new Map();
 let memoryNodeGroup = null;
 let memoryNodes = [];
 let activationConnectionGroup = null;
 let memoryConnections = [];
+let entityLensGroup = null;
+let entityLensHitTargets = [];
 let brainCamera = null;
 let brainControls = null;
 let cameraFocus = null;
@@ -74,6 +98,15 @@ const pointer = new THREE.Vector2();
 const pointerDown = new THREE.Vector2();
 const DRAG_THRESHOLD = 5;
 const CAMERA_FOCUS_DURATION = 450;
+let activeFilter = "all";
+let searchQuery = "";
+let semanticSearch = createEmptySemanticSearch();
+let searchDebounceTimer = null;
+let searchRequestController = null;
+let entityLens = null;
+let entityRequestController = null;
+let navigationHistory = [];
+const entityGraphCache = new Map();
 
 input.maxLength = MAX_LENGTH;
 input.addEventListener("input", () => {
@@ -100,7 +133,15 @@ form.addEventListener("submit", async (event) => {
       const serverMemory = await res.json();
       const memory = normalizeServerMemory(serverMemory);
       memories.unshift(memory);
+      resetEntityTraversal();
       selectedMemoryId = memory.id;
+      entityGraphCache.clear();
+      navigationHistory = pushNavigation(navigationHistory, {
+        type: "memory",
+        id: memory.id,
+        label: getMemoryNavigationLabel(memory),
+      });
+      if (searchQuery.trim()) scheduleSemanticSearch({ immediate: true });
       render();
     } else {
       const err = await res.json();
@@ -132,13 +173,32 @@ clearButton.addEventListener("click", async () => {
 
   memories = [];
   selectedMemoryId = null;
+  entityGraphCache.clear();
+  resetEntityTraversal();
+  if (searchQuery.trim()) scheduleSemanticSearch({ immediate: true });
   render();
 });
 
 clearSelectionButton.addEventListener("click", clearSelection);
+searchInput.addEventListener("input", () => {
+  searchQuery = searchInput.value;
+  scheduleSemanticSearch();
+  render();
+});
+searchInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !searchQuery.trim()) return;
+  event.preventDefault();
+  scheduleSemanticSearch({ immediate: true });
+  render();
+});
+resetFiltersButton.addEventListener("click", resetFilters);
 reduceMotion.addEventListener("change", () => {
   updateRegionMarkers();
   updateActivationConnections();
+});
+
+document.querySelectorAll(".filter-button").forEach((btn) => {
+  btn.addEventListener("click", () => setFilter(btn.dataset.filter));
 });
 
 function normalizeServerMemory(m) {
@@ -148,6 +208,7 @@ function normalizeServerMemory(m) {
     createdAt: m.created_at,
     ingestionDate: m.ingestion_date,
     summary: m.summary,
+    source: m.source || "ui",
     extraction: m.extraction?.extraction_json || m.extraction || null,
     entities: m.entities || [],
     relationships: m.relationships || [],
@@ -219,69 +280,499 @@ function fragment(type, label) {
   };
 }
 
+function getFilteredMemories() {
+  const normalizedQuery = searchQuery.trim();
+  const hasCurrentSemanticResults =
+    semanticSearch.status === "success" &&
+    semanticSearch.query === normalizedQuery;
+
+  return filterMemoriesForSearch(memories, {
+    query: normalizedQuery,
+    source: activeFilter,
+    semanticIds: hasCurrentSemanticResults ? semanticSearch.ids : null,
+  });
+}
+
+function setFilter(filter) {
+  activeFilter = filter;
+  render();
+}
+
+function resetFilters() {
+  activeFilter = "all";
+  searchQuery = "";
+  searchInput.value = "";
+  resetSemanticSearch();
+  render();
+  searchInput.focus();
+}
+
+function updateFilterControls() {
+  document.querySelectorAll(".filter-button").forEach((btn) => {
+    const active = btn.dataset.filter === activeFilter;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  });
+  resetFiltersButton.hidden =
+    activeFilter === "all" && searchQuery.trim().length === 0;
+
+  const query = searchQuery.trim();
+  const hasCurrentStatus = semanticSearch.query === query;
+  searchInput.setAttribute(
+    "aria-busy",
+    String(hasCurrentStatus && semanticSearch.status === "loading"),
+  );
+  searchStatus.classList.toggle(
+    "is-error",
+    hasCurrentStatus && semanticSearch.status === "error",
+  );
+
+  if (!query || !hasCurrentStatus || semanticSearch.status === "idle") {
+    searchStatus.hidden = true;
+    searchStatus.textContent = "";
+  } else if (semanticSearch.status === "loading") {
+    searchStatus.hidden = false;
+    searchStatus.textContent = "Searching memory meaning...";
+  } else if (semanticSearch.status === "error") {
+    searchStatus.hidden = false;
+    searchStatus.textContent =
+      "Semantic search unavailable. Showing text matches.";
+  } else {
+    const visibleCount = getFilteredMemories().length;
+    searchStatus.hidden = false;
+    searchStatus.textContent = `${visibleCount} semantic ${
+      visibleCount === 1 ? "match" : "matches"
+    }`;
+  }
+}
+
+function createEmptySemanticSearch() {
+  return {
+    query: "",
+    status: "idle",
+    ids: [],
+    scores: new Map(),
+  };
+}
+
+function resetSemanticSearch() {
+  window.clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = null;
+  searchRequestController?.abort();
+  searchRequestController = null;
+  semanticSearch = createEmptySemanticSearch();
+}
+
+function scheduleSemanticSearch({ immediate = false } = {}) {
+  window.clearTimeout(searchDebounceTimer);
+  searchRequestController?.abort();
+  searchRequestController = null;
+
+  const query = searchQuery.trim();
+  if (!query) {
+    semanticSearch = createEmptySemanticSearch();
+    return;
+  }
+
+  semanticSearch = {
+    query,
+    status: "loading",
+    ids: [],
+    scores: new Map(),
+  };
+  searchDebounceTimer = window.setTimeout(
+    () => runSemanticSearch(query),
+    immediate ? 0 : SEARCH_DEBOUNCE_MS,
+  );
+}
+
+async function runSemanticSearch(query) {
+  const controller = new AbortController();
+  searchRequestController = controller;
+
+  try {
+    const response = await fetch(
+      `/api/memories/search?q=${encodeURIComponent(
+        query,
+      )}&limit=100&scoreThreshold=${SEMANTIC_SCORE_THRESHOLD}`,
+      { signal: controller.signal },
+    );
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || body.error || "Search request failed");
+    }
+
+    const result = await response.json();
+    if (controller.signal.aborted || searchQuery.trim() !== query) return;
+
+    const resultMemories = result.memories.map(normalizeServerMemory);
+    mergeSearchMemories(resultMemories);
+    semanticSearch = {
+      query,
+      status: "success",
+      ids: resultMemories.map((memory) => memory.id),
+      scores: new Map(
+        result.memories.map((memory) => [memory.id, memory.similarity]),
+      ),
+    };
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    if (searchQuery.trim() !== query) return;
+    console.error("Semantic search failed:", error);
+    semanticSearch = {
+      query,
+      status: "error",
+      ids: [],
+      scores: new Map(),
+    };
+  } finally {
+    if (searchRequestController === controller) {
+      searchRequestController = null;
+    }
+  }
+
+  render();
+}
+
+function mergeSearchMemories(searchMemories) {
+  const incoming = new Map(searchMemories.map((memory) => [memory.id, memory]));
+  memories = memories.map((memory) => incoming.get(memory.id) || memory);
+  const knownIds = new Set(memories.map((memory) => memory.id));
+  memories.push(
+    ...searchMemories.filter((memory) => !knownIds.has(memory.id)),
+  );
+}
+
 function render() {
+  const filtered = getFilteredMemories();
+  const visibleIds = new Set(filtered.map((memory) => memory.id));
+
+  if (selectedMemoryId && !visibleIds.has(selectedMemoryId)) {
+    selectedMemoryId = null;
+    selectedRegion = null;
+    hoveredRegion = null;
+    cameraFocus = null;
+  }
   if (
     hoveredMemoryId &&
-    !memories.some((memory) => memory.id === hoveredMemoryId)
+    !visibleIds.has(hoveredMemoryId)
   ) {
     setHoveredMemory(null);
   }
-  memoryNodeState = createMemoryNodeState(memories);
-  memoryCount.textContent = memories.length;
-  emptyState.hidden = memories.length > 0;
+
+  memoryNodeState = createMemoryNodeState(filtered);
+  syncSelectedRegion();
+  updateFilterControls();
+  memoryCount.textContent = filtered.length;
+  emptyState.hidden = filtered.length > 0;
   renderMemoryList();
   renderDetail();
   renderMemoryNodes();
   updateRegionMarkers();
   updateActivationConnections();
+  updateRegionLabels();
   updateClearSelectionButton();
 }
 
-function selectMemory(id) {
+function selectMemory(id, { recordHistory = true } = {}) {
+  const memory = memories.find((item) => item.id === id);
+  if (!memory) return;
+
+  abortEntityRequest();
+  entityLens = null;
   selectedMemoryId = id;
+  hoveredRegion = null;
+  selectedRegion = memoryNodeState.get(id)?.core.region || null;
+  if (recordHistory) {
+    navigationHistory = pushNavigation(navigationHistory, {
+      type: "memory",
+      id,
+      label: getMemoryNavigationLabel(memory),
+    });
+  }
   renderDetail();
   updateMemoryListSelection();
   updateMemoryNodeSelection();
+  renderEntityLens3D();
   updateRegionMarkers();
   updateActivationConnections();
+  updateRegionLabels();
   updateClearSelectionButton();
   focusSelectedMemory();
-  document.querySelector(".atlas-panel").scrollIntoView({
-    behavior: "smooth",
-    block: "center",
-  });
+  const atlasPanel = document.querySelector(".atlas-panel");
+  const atlasRect = atlasPanel.getBoundingClientRect();
+  const inView = atlasRect.top < window.innerHeight && atlasRect.bottom > 0;
+  if (!inView) {
+    atlasPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
 }
 
 function clearSelection() {
+  resetEntityTraversal();
   selectedMemoryId = null;
+  selectedRegion = null;
+  hoveredRegion = null;
   cameraFocus = null;
   renderDetail();
   updateMemoryListSelection();
   updateMemoryNodeSelection();
+  renderEntityLens3D();
   updateRegionMarkers();
   updateActivationConnections();
+  updateRegionLabels();
   updateClearSelectionButton();
 }
 
+function syncSelectedRegion() {
+  if (!selectedMemoryId) {
+    selectedRegion = null;
+    return;
+  }
+
+  const state = memoryNodeState.get(selectedMemoryId);
+  if (!state) {
+    selectedRegion = null;
+    return;
+  }
+
+  if (!state.activations.some(({ region }) => region === selectedRegion)) {
+    selectedRegion = state.core.region;
+  }
+}
+
+function getActiveMemoryId() {
+  if (entityLens) return hoveredMemoryId;
+  return hoveredMemoryId || selectedMemoryId;
+}
+
+function getFocusedRegion() {
+  if (entityLens) return null;
+  if (hoveredRegion) return hoveredRegion;
+  return getActiveMemoryId() === selectedMemoryId ? selectedRegion : null;
+}
+
+function setHoveredRegion(region) {
+  if (hoveredRegion === region) return;
+  hoveredRegion = region;
+  updateRegionMarkers();
+  updateActivationConnections();
+  updateRegionInspectorSelection();
+}
+
+function selectRegion(region) {
+  const state = memoryNodeState.get(selectedMemoryId);
+  if (!state?.activations.some((activation) => activation.region === region)) {
+    return;
+  }
+
+  selectedRegion = region;
+  hoveredRegion = null;
+  updateRegionMarkers();
+  updateActivationConnections();
+  updateRegionInspectorSelection({ revealSelected: true });
+}
+
 function updateClearSelectionButton() {
-  clearSelectionButton.hidden = selectedMemoryId == null;
+  clearSelectionButton.hidden =
+    selectedMemoryId == null && entityLens == null && navigationHistory.length === 0;
+}
+
+function resetEntityTraversal() {
+  abortEntityRequest();
+  entityLens = null;
+  navigationHistory = [];
+}
+
+function abortEntityRequest() {
+  entityRequestController?.abort();
+  entityRequestController = null;
+}
+
+async function focusEntity(
+  entityId,
+  originMemoryId = selectedMemoryId,
+  { entity: knownEntity = null, recordHistory = true } = {},
+) {
+  const id = Number(entityId);
+  if (!Number.isInteger(id)) return;
+
+  abortEntityRequest();
+  selectedMemoryId = originMemoryId || selectedMemoryId;
+  selectedRegion = null;
+  hoveredRegion = null;
+  hoveredMemoryId = null;
+  entityLens = {
+    entityId: id,
+    originMemoryId: originMemoryId || selectedMemoryId,
+    entity: knownEntity,
+    graph: null,
+    loading: true,
+    error: null,
+    previewRelationshipId: null,
+    hasFocused: false,
+  };
+  if (recordHistory) {
+    navigationHistory = pushNavigation(navigationHistory, {
+      type: "entity",
+      id,
+      label: knownEntity?.canonical_name || `Entity ${id}`,
+      kind: knownEntity?.kind || null,
+      originMemoryId: entityLens.originMemoryId,
+    });
+  }
+  render();
+
+  const cached = entityGraphCache.get(id);
+  if (cached) {
+    applyEntityGraph(id, cached);
+    return;
+  }
+
+  const controller = new AbortController();
+  entityRequestController = controller;
+  try {
+    const response = await fetch(`/api/entities/${id}/graph`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Entity request failed (${response.status})`);
+    }
+    const graph = normalizeEntityGraph(await response.json());
+    entityGraphCache.set(id, graph);
+    applyEntityGraph(id, graph);
+  } catch (error) {
+    if (error.name === "AbortError" || entityLens?.entityId !== id) return;
+    entityLens = {
+      ...entityLens,
+      loading: false,
+      error: error.message,
+    };
+    render();
+  } finally {
+    if (entityRequestController === controller) entityRequestController = null;
+  }
+}
+
+function normalizeEntityGraph(graph) {
+  return {
+    ...graph,
+    memories: (graph.memories || []).map(normalizeServerMemory),
+    relationships: graph.relationships || [],
+  };
+}
+
+function applyEntityGraph(entityId, graph) {
+  if (entityLens?.entityId !== entityId) return;
+
+  mergeEntityGraphMemories(graph.memories);
+  entityLens = {
+    ...entityLens,
+    entity: graph.entity,
+    graph,
+    loading: false,
+    error: null,
+  };
+  const last = navigationHistory.at(-1);
+  if (last?.type === "entity" && Number(last.id) === entityId) {
+    last.label = graph.entity.canonical_name;
+    last.kind = graph.entity.kind;
+  }
+  render();
+}
+
+function mergeEntityGraphMemories(graphMemories) {
+  const incoming = new Map(
+    graphMemories.map((memory) => [memory.id, memory]),
+  );
+  memories = memories.map((memory) => incoming.get(memory.id) || memory);
+  const knownIds = new Set(memories.map((memory) => memory.id));
+  for (const memory of graphMemories) {
+    if (!knownIds.has(memory.id)) memories.push(memory);
+  }
+}
+
+function navigateToHistory(index) {
+  const restored = restoreNavigation(navigationHistory, index);
+  if (!restored.current) return;
+
+  navigationHistory = restored.history;
+  if (restored.current.type === "memory") {
+    selectMemory(restored.current.id, { recordHistory: false });
+    return;
+  }
+  focusEntity(
+    restored.current.id,
+    restored.current.originMemoryId,
+    {
+      entity: {
+        id: Number(restored.current.id),
+        canonical_name: restored.current.label,
+        kind: restored.current.kind,
+      },
+      recordHistory: false,
+    },
+  );
+}
+
+function getMemoryNavigationLabel(memory) {
+  const label = memory.summary || memory.text || memory.id;
+  return label.length > 34 ? `${label.slice(0, 31)}...` : label;
+}
+
+function renderBreadcrumb() {
+  if (!navigationHistory.length) return null;
+
+  const nav = document.createElement("nav");
+  nav.className = "detail-breadcrumb";
+  nav.setAttribute("aria-label", "Traversal history");
+  navigationHistory.forEach((entry, index) => {
+    if (index > 0) {
+      const separator = document.createElement("span");
+      separator.textContent = "/";
+      separator.setAttribute("aria-hidden", "true");
+      nav.append(separator);
+    }
+
+    if (index === navigationHistory.length - 1) {
+      const current = document.createElement("span");
+      current.className = "breadcrumb-current";
+      current.textContent = entry.label;
+      nav.append(current);
+      return;
+    }
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = entry.label;
+    button.addEventListener("click", () => navigateToHistory(index));
+    nav.append(button);
+  });
+  return nav;
 }
 
 function renderDetail(sourceNode) {
+  if (entityLens) {
+    renderEntityDetail();
+    return;
+  }
+
   const memory = memories.find((item) => item.id === selectedMemoryId);
 
   if (!memory) {
     detail.innerHTML =
-      '<span class="detail-index">SELECT A NODE</span><p>Connected fragments will brighten when you inspect a memory.</p>';
+      '<span class="detail-index">SELECT A MEMORY</span><p>Its participating brain regions will appear as activation fields and paths.</p>';
     return;
   }
 
   const sourceLabel =
     sourceNode && sourceNode.type !== "event"
       ? `${sourceNode.type.toUpperCase()} / ${sourceNode.label}`
-      : "EPISODIC TRACE";
+      : "MEMORY CORE";
 
   detail.replaceChildren();
+  const breadcrumb = renderBreadcrumb();
+  if (breadcrumb) detail.append(breadcrumb);
   const index = document.createElement("span");
   index.className = "detail-index";
   index.textContent = sourceLabel;
@@ -291,7 +782,9 @@ function renderDetail(sourceNode) {
   const text = document.createElement("p");
   text.textContent = memory.text;
   copy.append(text);
+  const regionTable = createRegionRoleTable(memory);
   detail.append(index, copy);
+  if (regionTable) detail.append(regionTable);
 
   if (memory.extraction) {
     const ex = memory.extraction;
@@ -320,16 +813,23 @@ function renderDetail(sourceNode) {
       detail.append(emotions);
     }
 
-    if (ex.entities?.length) {
+    const storedEntities = memory.entities || [];
+    if (storedEntities.length || ex.entities?.length) {
       const entities = document.createElement("div");
       entities.className = "detail-section";
       entities.innerHTML = '<span class="detail-label">ENTITIES</span>';
-      ex.entities.forEach((e) => {
-        const chip = document.createElement("span");
-        chip.className = `tag tag-${e.kind === "person" ? "person" : "place"}`;
-        chip.textContent = `${e.mention} [${e.kind}]`;
-        entities.append(chip);
-      });
+      if (storedEntities.length) {
+        storedEntities.forEach((entity) => {
+          entities.append(createEntityChip(entity, memory.id));
+        });
+      } else {
+        ex.entities.forEach((entity) => {
+          const chip = document.createElement("span");
+          chip.className = `tag tag-${entity.kind}`;
+          chip.textContent = `${entity.mention} [${entity.kind}]`;
+          entities.append(chip);
+        });
+      }
       detail.append(entities);
     }
 
@@ -357,6 +857,227 @@ function renderDetail(sourceNode) {
   renderRegionExplanation(memory);
 }
 
+function createEntityChip(entity, originMemoryId) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = `tag entity-chip tag-${entity.kind}`;
+  chip.textContent = `${entity.canonical_name} [${entity.kind}]`;
+  chip.title =
+    entity.mention && entity.mention !== entity.canonical_name
+      ? `Mentioned as "${entity.mention}"`
+      : `Explore ${entity.canonical_name}`;
+  chip.addEventListener("click", () => {
+    focusEntity(entity.id, originMemoryId, { entity });
+  });
+  return chip;
+}
+
+function renderEntityDetail() {
+  detail.replaceChildren();
+  const breadcrumb = renderBreadcrumb();
+  if (breadcrumb) detail.append(breadcrumb);
+
+  const index = document.createElement("span");
+  index.className = "detail-index";
+  index.textContent = "ENTITY LENS";
+  const copy = document.createElement("div");
+  copy.className = "detail-copy entity-copy";
+  detail.append(index, copy);
+
+  if (entityLens.loading) {
+    const loading = document.createElement("p");
+    loading.className = "entity-status";
+    loading.textContent = "Loading linked memories and relationships...";
+    copy.append(loading);
+    return;
+  }
+
+  if (entityLens.error) {
+    const error = document.createElement("p");
+    error.className = "entity-status entity-error";
+    error.textContent = entityLens.error;
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "text-button";
+    retry.textContent = "Retry";
+    retry.addEventListener("click", () => {
+      focusEntity(entityLens.entityId, entityLens.originMemoryId, {
+        entity: entityLens.entity,
+        recordHistory: false,
+      });
+    });
+    copy.append(error, retry);
+    return;
+  }
+
+  const graph = entityLens.graph;
+  const entity = graph.entity;
+  const visibleIds = new Set(
+    getFilteredMemories().map((memory) => memory.id),
+  );
+  const visibility = filterEntityGraphMemories(graph, visibleIds);
+  const heading = document.createElement("div");
+  heading.className = "entity-heading";
+  heading.style.setProperty(
+    "--entity-color",
+    ENTITY_KIND_COLORS[entity.kind] || DEFAULT_MEMORY_COLOR,
+  );
+  const marker = document.createElement("i");
+  marker.setAttribute("aria-hidden", "true");
+  const name = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = entity.canonical_name;
+  const kind = document.createElement("span");
+  kind.textContent = entity.kind;
+  name.append(title, kind);
+  heading.append(marker, name);
+
+  const count = document.createElement("p");
+  count.className = "entity-count";
+  count.textContent = `${visibility.visible.length} visible of ${
+    visibility.total
+  } linked ${visibility.total === 1 ? "memory" : "memories"}`;
+  copy.append(heading, count);
+
+  const memoriesSection = document.createElement("section");
+  memoriesSection.className = "detail-section entity-memory-section";
+  memoriesSection.append(createDetailLabel("LINKED MEMORIES"));
+  const memoryListElement = document.createElement("div");
+  memoryListElement.className = "entity-memory-list";
+
+  graph.memories.forEach((memory) => {
+    const visible = visibleIds.has(memory.id);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "entity-memory-button";
+    button.dataset.memoryId = memory.id;
+    button.disabled = !visible;
+    const label = document.createElement("strong");
+    label.textContent = memory.summary || memory.text;
+    const meta = document.createElement("span");
+    meta.textContent = visible
+      ? `${memory.source === "mcp" ? "Agent" : "User"} memory`
+      : "Hidden by current filters";
+    button.append(label, meta);
+    button.addEventListener("click", () => selectMemory(memory.id));
+    memoryListElement.append(button);
+  });
+  if (!graph.memories.length) {
+    const empty = document.createElement("p");
+    empty.className = "entity-status";
+    empty.textContent = "No memories are linked to this entity.";
+    memoryListElement.append(empty);
+  }
+  memoriesSection.append(memoryListElement);
+  detail.append(memoriesSection);
+
+  const relationshipsSection = document.createElement("section");
+  relationshipsSection.className = "detail-section relationship-section";
+  relationshipsSection.append(createDetailLabel("EXPLICIT RELATIONSHIPS"));
+  const relationshipsList = document.createElement("div");
+  relationshipsList.className = "relationship-list";
+  graph.relationships.forEach((relationship) => {
+    relationshipsList.append(
+      createRelationshipRow(relationship, visibleIds),
+    );
+  });
+  if (!graph.relationships.length) {
+    const empty = document.createElement("p");
+    empty.className = "entity-status";
+    empty.textContent = "No explicit relationships were extracted.";
+    relationshipsList.append(empty);
+  }
+  relationshipsSection.append(relationshipsList);
+  detail.append(relationshipsSection);
+}
+
+function createRelationshipRow(relationship, visibleIds) {
+  const row = document.createElement("article");
+  row.className = "relationship-row";
+  row.tabIndex = 0;
+  row.dataset.relationshipId = relationship.id;
+
+  const sentence = document.createElement("div");
+  sentence.className = "relationship-sentence";
+  sentence.append(
+    createRelationshipEntityControl(relationship.source, relationship),
+  );
+  const predicate = document.createElement("span");
+  predicate.className = "relationship-predicate";
+  predicate.textContent = `\u2192 ${relationship.predicate} \u2192`;
+  sentence.append(
+    predicate,
+    createRelationshipEntityControl(relationship.target, relationship),
+  );
+
+  const metadata = document.createElement("div");
+  metadata.className = "relationship-metadata";
+  const confidence = document.createElement("span");
+  confidence.textContent = `${formatPercent(
+    relationship.confidence,
+  )} confidence`;
+  const evidenceMemory = entityLens.graph.memories.find(
+    (memory) => memory.id === relationship.memory_id,
+  );
+  const evidenceButton = document.createElement("button");
+  evidenceButton.type = "button";
+  evidenceButton.disabled = !visibleIds.has(relationship.memory_id);
+  evidenceButton.textContent = evidenceMemory
+    ? `Evidence: ${getMemoryNavigationLabel(evidenceMemory)}`
+    : "Evidence memory unavailable";
+  evidenceButton.addEventListener("click", () => {
+    selectMemory(relationship.memory_id);
+  });
+  metadata.append(confidence, evidenceButton);
+
+  row.append(sentence, metadata);
+  if (relationship.evidence) {
+    const evidence = document.createElement("blockquote");
+    evidence.textContent = relationship.evidence;
+    row.append(evidence);
+  }
+
+  row.addEventListener("pointerenter", () => {
+    setRelationshipPreview(relationship.id);
+  });
+  row.addEventListener("pointerleave", () => setRelationshipPreview(null));
+  row.addEventListener("focusin", () => {
+    setRelationshipPreview(relationship.id);
+  });
+  row.addEventListener("focusout", (event) => {
+    if (!row.contains(event.relatedTarget)) setRelationshipPreview(null);
+  });
+  return row;
+}
+
+function createRelationshipEntityControl(entity, relationship) {
+  if (Number(entity.id) === entityLens.entityId) {
+    const current = document.createElement("span");
+    current.className = `relationship-entity tag-${entity.kind}`;
+    current.textContent = entity.canonical_name;
+    return current;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `relationship-entity tag-${entity.kind}`;
+  button.textContent = entity.canonical_name;
+  button.addEventListener("click", () => {
+    focusEntity(entity.id, relationship.memory_id, { entity });
+  });
+  return button;
+}
+
+function setRelationshipPreview(relationshipId) {
+  if (!entityLens || entityLens.previewRelationshipId === relationshipId) {
+    return;
+  }
+  entityLens.previewRelationshipId = relationshipId;
+  renderEntityLens3D();
+  updateMemoryNodeSelection();
+  updateMemoryListEntityState();
+}
+
 function createDetailLabel(text) {
   const label = document.createElement("span");
   label.className = "detail-label";
@@ -364,18 +1085,47 @@ function createDetailLabel(text) {
   return label;
 }
 
+function createRegionRoleTable(memory) {
+  const regions = getSortedRegions(memory);
+  if (!regions.length) return null;
+
+  const table = document.createElement("table");
+  table.className = "region-role-table memory-region-table";
+  table.setAttribute("aria-label", "Selected brain areas and their roles");
+  const tableHead = document.createElement("thead");
+  tableHead.innerHTML = "<tr><th>Area</th><th>Role</th></tr>";
+  const tableBody = document.createElement("tbody");
+
+  regions.forEach(({ region }) => {
+    const anchor = REGION_ANCHORS[region];
+    const row = document.createElement("tr");
+    row.dataset.region = region;
+    const areaCell = document.createElement("th");
+    areaCell.scope = "row";
+    const areaButton = document.createElement("button");
+    areaButton.type = "button";
+    areaButton.style.setProperty("--region-color", anchor.color);
+    areaButton.textContent = anchor.label;
+    areaButton.addEventListener("click", () => selectRegion(region));
+    areaCell.append(areaButton);
+    const roleCell = document.createElement("td");
+    roleCell.textContent = anchor.role;
+    row.append(areaCell, roleCell);
+    tableBody.append(row);
+  });
+
+  table.append(tableHead, tableBody);
+  return table;
+}
+
 function renderRegionExplanation(memory) {
   const section = document.createElement("section");
   section.className = "detail-section activation-detail";
-  section.append(createDetailLabel("BRAIN REGION ACTIVATION"));
 
-  const regions = [...memory.regions]
-    .filter(({ region, weight }) =>
-      REGION_ANCHORS[region] && Number.isFinite(weight) && weight > 0
-    )
-    .sort((a, b) => b.weight - a.weight || a.region.localeCompare(b.region));
+  const regions = getSortedRegions(memory);
 
   if (!regions.length) {
+    section.append(createDetailLabel("BRAIN REGION ACTIVATION"));
     const empty = document.createElement("p");
     empty.className = "activation-empty";
     empty.textContent =
@@ -385,6 +1135,21 @@ function renderRegionExplanation(memory) {
     return;
   }
 
+  const summary = document.createElement("div");
+  summary.className = "activation-summary";
+  const count = document.createElement("strong");
+  count.textContent = `1 memory \u00b7 ${regions.length} active ${
+    regions.length === 1 ? "region" : "regions"
+  }`;
+  const clarification = document.createElement("p");
+  clarification.textContent =
+    "Why these areas? The atlas maps extracted memory type, emotion, and physical actions to brain regions. Scores are relative, not measured activity.";
+  summary.append(count, clarification);
+  section.append(summary);
+
+  const activationList = document.createElement("div");
+  activationList.className = "activation-list";
+
   const contributions = memory.extraction
     ? getRegionContributions(memory.extraction)
     : [];
@@ -393,9 +1158,20 @@ function renderRegionExplanation(memory) {
     const anchor = REGION_ANCHORS[region];
     const item = document.createElement("article");
     item.className = "activation-item";
+    item.dataset.region = region;
+    item.addEventListener("pointerenter", () => setHoveredRegion(region));
+    item.addEventListener("pointerleave", () => setHoveredRegion(null));
 
-    const heading = document.createElement("div");
+    const heading = document.createElement("button");
+    heading.type = "button";
     heading.className = "activation-heading";
+    heading.setAttribute(
+      "aria-label",
+      `Focus ${anchor.label}, ${formatPercent(weight)} relative activation`,
+    );
+    heading.addEventListener("focus", () => setHoveredRegion(region));
+    heading.addEventListener("blur", () => setHoveredRegion(null));
+    heading.addEventListener("click", () => selectRegion(region));
     const name = document.createElement("span");
     name.className = "activation-name";
     const swatch = document.createElement("i");
@@ -405,7 +1181,7 @@ function renderRegionExplanation(memory) {
     name.append(swatch, label);
 
     const percentage = document.createElement("strong");
-    percentage.textContent = formatPercent(weight);
+    percentage.textContent = `${formatPercent(weight)} activation`;
     heading.append(name, percentage);
 
     const meter = document.createElement("div");
@@ -417,12 +1193,26 @@ function renderRegionExplanation(memory) {
 
     const reasons = document.createElement("ul");
     reasons.className = "activation-reasons";
+    const explanation = document.createElement("details");
+    explanation.className = "activation-explanation";
+    explanation.open = region === selectedRegion;
+    const explanationToggle = document.createElement("summary");
+    explanationToggle.textContent = "Why this area?";
+    explanation.addEventListener("toggle", () => {
+      if (explanation.open && selectedRegion !== region) {
+        selectRegion(region);
+      }
+    });
     const regionContributions = contributions.filter(
       (contribution) => contribution.region === region && contribution.amount > 0
     );
 
     if (index === 0) {
-      reasons.append(createReason("Highest normalized weight, so this is the dominant region."));
+      reasons.append(
+        createReason(
+          "This area has the highest combined score, so the memory node is placed nearest to it.",
+        ),
+      );
     }
 
     regionContributions.forEach((contribution) => {
@@ -433,29 +1223,76 @@ function renderRegionExplanation(memory) {
       reasons.append(createReason("Stored activation; source breakdown is unavailable."));
     }
 
-    item.append(heading, meter, reasons);
-    section.append(item);
+    explanation.append(explanationToggle, reasons);
+    item.append(heading, meter, explanation);
+    activationList.append(item);
   });
 
+  section.append(activationList);
   detail.append(section);
+  updateRegionInspectorSelection({ revealSelected: true });
+}
+
+function getSortedRegions(memory) {
+  return [...(memory?.regions || [])]
+    .filter(
+      ({ region, weight }) =>
+        REGION_ANCHORS[region] && Number.isFinite(weight) && weight > 0,
+    )
+    .sort((a, b) => b.weight - a.weight || a.region.localeCompare(b.region));
+}
+
+function updateRegionInspectorSelection({ revealSelected = false } = {}) {
+  const focusedRegion = getFocusedRegion();
+
+  detail.querySelectorAll(".activation-item").forEach((item) => {
+    const focused = item.dataset.region === focusedRegion;
+    const selected = item.dataset.region === selectedRegion;
+    item.classList.toggle("is-focused", focused);
+    item.querySelector(".activation-heading")?.setAttribute(
+      "aria-pressed",
+      String(selected),
+    );
+    if (revealSelected) {
+      const explanation = item.querySelector(".activation-explanation");
+      if (explanation) explanation.open = selected;
+    }
+  });
+
+  detail.querySelectorAll(".region-role-table tr[data-region]").forEach((row) => {
+    const focused = row.dataset.region === focusedRegion;
+    const selected = row.dataset.region === selectedRegion;
+    row.classList.toggle("is-focused", focused);
+    row.classList.toggle("is-selected", selected);
+  });
+
+  regionLabelButtons.forEach((button, region) => {
+    const focused = region === focusedRegion;
+    button.classList.toggle("is-focused", focused);
+    button.setAttribute("aria-pressed", String(region === selectedRegion));
+  });
 }
 
 function createContributionReason(contribution, regionLabel) {
   if (contribution.source === "type") {
     return createReason(
-      `${capitalize(contribution.type)} memory: ${formatPercent(
+      `The memory was classified as ${contribution.type} (${formatPercent(
         contribution.typeWeight
-      )} type weight \u00d7 ${formatPercent(
+      )} weight). The atlas maps ${formatPercent(
         contribution.ruleWeight
-      )} ${regionLabel} rule.`
+      )} of that memory-type signal to ${regionLabel}.`
     );
   }
 
   if (contribution.source === "emotion") {
     const reason = createReason(
-      `${capitalize(contribution.label)} emotion: ${formatPercent(
+      `The extracted "${contribution.label}" emotion has ${formatPercent(
         contribution.intensity
-      )} intensity \u00d7 ${formatPercent(contribution.arousal)} arousal.`
+      )} intensity and ${formatPercent(
+        contribution.arousal,
+      )} arousal. The atlas maps ${formatPercent(
+        contribution.ruleWeight,
+      )} of that emotional signal to ${regionLabel}.`
     );
     if (Number.isFinite(contribution.confidence)) {
       const confidence = document.createElement("span");
@@ -469,7 +1306,7 @@ function createContributionReason(contribution, regionLabel) {
   }
 
   return createReason(
-    `Physical action "${contribution.action}" adds motor activation.`
+    `The physical action "${contribution.action}" adds a motor signal, which selects Motor cortex.`
   );
 }
 
@@ -489,26 +1326,49 @@ function capitalize(value) {
 
 function renderMemoryList() {
   memoryList.replaceChildren();
+  const filtered = getFilteredMemories();
+  const hasSemanticResults =
+    semanticSearch.status === "success" &&
+    semanticSearch.query === searchQuery.trim();
 
-  if (!memories.length) {
+  if (!filtered.length) {
     const empty = document.createElement("p");
     empty.className = "memory-empty";
-    empty.textContent = "No traces yet. Record a moment to begin the atlas.";
+    if (semanticSearch.status === "loading" && searchQuery.trim()) {
+      empty.textContent = "Searching memory meaning...";
+    } else {
+      empty.textContent = memories.length
+        ? "No memories match the current search and filters."
+        : "No traces yet. Record a moment to begin the atlas.";
+    }
     memoryList.append(empty);
     return;
   }
 
-  memories.forEach((memory, index) => {
+  filtered.forEach((memory, index) => {
     const card = cardTemplate.content.firstElementChild.cloneNode(true);
-    card.querySelector(".memory-number").textContent = `TRACE ${String(
-      memories.length - index,
-    ).padStart(2, "0")}`;
+    card.querySelector(".memory-number").textContent = hasSemanticResults
+      ? `MATCH ${String(index + 1).padStart(2, "0")}`
+      : `TRACE ${String(filtered.length - index).padStart(2, "0")}`;
     card.querySelector("time").textContent = formatDate(memory.createdAt);
     card.querySelector(".memory-text").textContent = memory.text;
     card.dataset.memoryId = memory.id;
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-pressed", String(memory.id === selectedMemoryId));
+
+    const similarity = semanticSearch.scores.get(memory.id);
+    if (hasSemanticResults && Number.isFinite(similarity)) {
+      const score = document.createElement("span");
+      score.className = "memory-similarity";
+      score.textContent = `${Math.round(
+        THREE.MathUtils.clamp(similarity, 0, 1) * 100,
+      )}% semantic`;
+      card.querySelector(".memory-card-top").insertBefore(
+        score,
+        card.querySelector("time"),
+      );
+    }
 
     const tags = card.querySelector(".memory-tags");
     memory.fragments.forEach((item) => {
@@ -526,6 +1386,7 @@ function renderMemoryList() {
     });
     memoryList.append(card);
   });
+  updateMemoryListEntityState();
 }
 
 function updateMemoryListSelection() {
@@ -533,6 +1394,25 @@ function updateMemoryListSelection() {
     card.setAttribute(
       "aria-pressed",
       String(card.dataset.memoryId === String(selectedMemoryId)),
+    );
+  });
+  updateMemoryListEntityState();
+}
+
+function updateMemoryListEntityState() {
+  const relatedIds = new Set(
+    entityLens?.graph?.memories.map((memory) => memory.id) || [],
+  );
+  const evidenceMemoryId = getPreviewRelationship()?.memory_id || null;
+
+  memoryList.querySelectorAll(".memory-card").forEach((card) => {
+    card.classList.toggle(
+      "is-entity-related",
+      relatedIds.has(card.dataset.memoryId),
+    );
+    card.classList.toggle(
+      "is-relationship-evidence",
+      card.dataset.memoryId === evidenceMemoryId,
     );
   });
 }
@@ -563,6 +1443,7 @@ function createRegionAnchorGroup() {
   const anchors = new THREE.Group();
   anchors.name = "region-anchors";
   regionMarkers = new Map();
+  regionMarkerHitTargets = [];
 
   Object.entries(REGION_ANCHORS).forEach(([region, definition]) => {
     const anchor = new THREE.Object3D();
@@ -576,6 +1457,7 @@ function createRegionAnchorGroup() {
     const marker = createRegionMarker(region, definition);
     anchor.add(marker);
     regionMarkers.set(region, marker);
+    regionMarkerHitTargets.push(marker.userData.hitTarget);
 
     if (SHOW_REGION_ANCHORS) {
       const debugMarker = new THREE.Mesh(
@@ -603,13 +1485,13 @@ function createRegionAnchorGroup() {
 
 function createRegionMarker(region, definition) {
   const color = new THREE.Color(definition.color);
-  const isCoreRegion = CORE_BRAIN_REGIONS.includes(region);
   const isDeepRegion = DEEP_BRAIN_REGIONS.has(region);
   const coreMaterial = new THREE.MeshBasicMaterial({
     color,
     transparent: true,
     opacity: 0,
     blending: THREE.AdditiveBlending,
+    depthTest: false,
     depthWrite: false,
   });
   const glowMaterial = new THREE.SpriteMaterial({
@@ -618,18 +1500,35 @@ function createRegionMarker(region, definition) {
     transparent: true,
     opacity: 0,
     blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const ringMaterial = new THREE.SpriteMaterial({
+    map: createActivationRingTexture(),
+    color,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.NormalBlending,
+    depthTest: false,
     depthWrite: false,
   });
   const marker = new THREE.Group();
   const core = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 24, 16),
+    new THREE.SphereGeometry(0.2, 24, 16),
     coreMaterial,
   );
+  core.userData.region = region;
+  core.userData.isRegionMarker = true;
   const glow = new THREE.Sprite(glowMaterial);
-  glow.scale.setScalar(isDeepRegion ? 0.9 : 1.2);
+  glow.scale.setScalar(isDeepRegion ? 1.45 : 1.8);
+  const ring = new THREE.Sprite(ringMaterial);
+  ring.scale.setScalar(isDeepRegion ? 0.72 : 0.92);
+  core.renderOrder = 6;
+  glow.renderOrder = 4;
+  ring.renderOrder = 5;
 
   marker.name = `region-marker:${region}`;
-  marker.visible = isCoreRegion;
+  marker.visible = false;
   marker.scale.setScalar(definition.markerScale);
   marker.userData = {
     region,
@@ -638,8 +1537,10 @@ function createRegionMarker(region, definition) {
     weight: 0,
     coreMaterial,
     glowMaterial,
+    ringMaterial,
+    hitTarget: core,
   };
-  marker.add(core, glow);
+  marker.add(glow, ring, core);
   return marker;
 }
 
@@ -658,10 +1559,37 @@ function createActivationFieldTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
+function createActivationRingTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const context = canvas.getContext("2d");
+
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = "rgba(255, 255, 255, 0.92)";
+  context.lineWidth = 4;
+  context.beginPath();
+  context.arc(64, 64, 47, 0, Math.PI * 2);
+  context.stroke();
+
+  context.strokeStyle = "rgba(255, 255, 255, 0.28)";
+  context.lineWidth = 10;
+  context.beginPath();
+  context.arc(64, 64, 47, 0, Math.PI * 2);
+  context.stroke();
+
+  return new THREE.CanvasTexture(canvas);
+}
+
 function updateRegionMarkers() {
   regionMarkers.forEach((marker) => setRegionMarkerWeight(marker, 0));
 
-  const activeMemoryId = hoveredMemoryId || selectedMemoryId;
+  if (entityLens) {
+    hasActiveRegionMarkers = false;
+    return;
+  }
+
+  const activeMemoryId = getActiveMemoryId();
   const memory = memories.find((item) => item.id === activeMemoryId);
   if (!memory) {
     hasActiveRegionMarkers = false;
@@ -670,24 +1598,48 @@ function updateRegionMarkers() {
 
   memory.regions.forEach(({ region, weight }) => {
     const marker = regionMarkers.get(region);
-    if (marker) setRegionMarkerWeight(marker, weight);
+    if (marker) {
+      setRegionMarkerWeight(marker, weight, region === getFocusedRegion());
+    }
   });
   hasActiveRegionMarkers = memory.regions.some(
     ({ region, weight }) => regionMarkers.has(region) && weight > 0,
   );
 }
 
-function setRegionMarkerWeight(marker, value) {
+function setRegionMarkerWeight(marker, value, focused = false) {
   const weight = THREE.MathUtils.clamp(Number(value) || 0, 0, 1);
-  const { isDeepRegion, markerScale, coreMaterial, glowMaterial } =
-    marker.userData;
+  const { coreMaterial, glowMaterial, ringMaterial } = marker.userData;
+  const hasFocusedRegion = Boolean(getFocusedRegion());
+  const emphasis = hasFocusedRegion ? (focused ? 1.2 : 0.74) : 1;
+  const strength = Math.sqrt(weight);
 
   marker.userData.weight = weight;
-  marker.scale.setScalar(
-    markerScale * (isDeepRegion ? 1.1 + weight * 0.55 : 0.85 + weight * 0.75),
+  marker.userData.focused = focused;
+  marker.visible = weight > 0;
+  marker.scale.setScalar(getRegionMarkerScale(marker));
+  coreMaterial.opacity = weight > 0
+    ? Math.min((0.2 + strength * 0.48) * emphasis, 1)
+    : 0;
+  glowMaterial.opacity = weight > 0
+    ? Math.min((0.26 + strength * 0.58) * emphasis, 1)
+    : 0;
+  ringMaterial.opacity = weight > 0
+    ? Math.min((0.34 + strength * 0.56) * emphasis, 1)
+    : 0;
+}
+
+function getRegionMarkerScale(marker, pulse = 1) {
+  const { focused, isDeepRegion, markerScale, weight } = marker.userData;
+  const strength = Math.sqrt(THREE.MathUtils.clamp(weight, 0, 1));
+
+  return (
+    markerScale *
+    (isDeepRegion ? 1.08 : 1) *
+    (0.94 + strength * 0.5) *
+    (focused ? 1.1 : 1) *
+    pulse
   );
-  coreMaterial.opacity = weight * (isDeepRegion ? 0.42 : 0.28);
-  glowMaterial.opacity = weight * (isDeepRegion ? 0.78 : 0.58);
 }
 
 function applyBrainMaterial(model) {
@@ -716,21 +1668,34 @@ function applyBrainMaterial(model) {
 function updateActivationConnections() {
   if (!activationConnectionGroup) return;
 
-  const activeMemoryId = hoveredMemoryId || selectedMemoryId;
+  if (entityLens) {
+    memoryConnections.forEach((connection) => {
+      connection.userData.tubeMaterial.opacity = 0;
+      connection.userData.glowMaterial.opacity = 0;
+      connection.userData.flowParticles.forEach((particle) => {
+        particle.visible = false;
+      });
+    });
+    return;
+  }
+
+  const activeMemoryId = getActiveMemoryId();
+  const focusedRegion = getFocusedRegion();
   memoryConnections.forEach((connection) => {
     const active = connection.userData.memoryId === activeMemoryId;
     const { weight, tubeMaterial, glowMaterial, flowParticles } =
       connection.userData;
+    const focused = connection.userData.region === focusedRegion;
+    const emphasis = focusedRegion ? (focused ? 1.28 : 0.52) : 1;
     const opacity = active
-      ? THREE.MathUtils.lerp(0.42, 0.82, weight)
-      : activeMemoryId == null
-        ? THREE.MathUtils.lerp(0.035, 0.16, weight)
-        : 0.012;
+      ? THREE.MathUtils.lerp(0.42, 0.82, weight) * emphasis
+      : 0;
 
-    tubeMaterial.opacity = opacity;
-    glowMaterial.opacity = active ? opacity * 0.26 : opacity * 0.12;
+    tubeMaterial.opacity = Math.min(opacity, 1);
+    glowMaterial.opacity = Math.min(opacity * 0.26, 1);
     flowParticles.forEach((particle) => {
-      particle.visible = active && !reduceMotion.matches;
+      particle.visible =
+        active && (!focusedRegion || focused) && !reduceMotion.matches;
     });
   });
 }
@@ -757,6 +1722,138 @@ function createRegionLabel(label, color) {
   return sprite;
 }
 
+function updateRegionLabels() {
+  if (entityLens) {
+    regionLabels.replaceChildren();
+    regionLabelButtons = new Map();
+    regionLabels.dataset.memoryId = "";
+    regionLabels.hidden = true;
+    return;
+  }
+
+  const visibleMemoryId =
+    selectedMemoryId &&
+    (!hoveredMemoryId || hoveredMemoryId === selectedMemoryId)
+      ? selectedMemoryId
+      : null;
+  const memory = memories.find((item) => item.id === visibleMemoryId);
+
+  if (!memory) {
+    regionLabels.replaceChildren();
+    regionLabelButtons = new Map();
+    regionLabels.dataset.memoryId = "";
+    regionLabels.hidden = true;
+    return;
+  }
+
+  if (regionLabels.dataset.memoryId === memory.id) {
+    regionLabels.hidden = false;
+    updateRegionInspectorSelection();
+    return;
+  }
+
+  regionLabels.replaceChildren();
+  regionLabelButtons = new Map();
+  regionLabels.dataset.memoryId = memory.id;
+  regionLabels.hidden = false;
+
+  getSortedRegions(memory).forEach(({ region, weight }) => {
+    const anchor = REGION_ANCHORS[region];
+    const button = document.createElement("button");
+    const swatch = document.createElement("i");
+    const label = document.createElement("span");
+    const percentage = document.createElement("strong");
+
+    button.type = "button";
+    button.className = "region-label";
+    button.dataset.region = region;
+    button.style.setProperty("--region-color", anchor.color);
+    button.setAttribute(
+      "aria-label",
+      `Focus ${anchor.label}, ${formatPercent(weight)} activation`,
+    );
+    swatch.setAttribute("aria-hidden", "true");
+    label.textContent = anchor.label;
+    percentage.textContent = formatPercent(weight);
+    button.append(swatch, label, percentage);
+
+    button.addEventListener("pointerenter", () => setHoveredRegion(region));
+    button.addEventListener("pointerleave", () => setHoveredRegion(null));
+    button.addEventListener("focus", () => setHoveredRegion(region));
+    button.addEventListener("blur", () => setHoveredRegion(null));
+    button.addEventListener("click", () => selectRegion(region));
+
+    regionLabels.append(button);
+    regionLabelButtons.set(region, button);
+  });
+
+  updateRegionInspectorSelection();
+}
+
+function updateRegionLabelPositions(camera) {
+  if (regionLabels.hidden || !regionLabelButtons.size) return;
+
+  const { width, height } = brainStage.getBoundingClientRect();
+  const marginX = Math.min(100, Math.max(62, width * 0.12));
+  const marginY = 34;
+  const projected = new THREE.Vector3();
+  const sides = { left: [], right: [] };
+
+  regionLabelButtons.forEach((button, region) => {
+    const marker = regionMarkers.get(region);
+    if (!marker?.visible) {
+      button.hidden = true;
+      return;
+    }
+
+    marker.getWorldPosition(projected);
+    projected.project(camera);
+    if (projected.z < -1 || projected.z > 1) {
+      button.hidden = true;
+      return;
+    }
+
+    button.hidden = false;
+    const screenX = (projected.x * 0.5 + 0.5) * width;
+    const side = screenX < width / 2 ? "left" : "right";
+    sides[side].push({
+      button,
+      x: THREE.MathUtils.clamp(
+        screenX + (side === "left" ? -28 : 28),
+        marginX,
+        width - marginX,
+      ),
+      y: THREE.MathUtils.clamp(
+        (-projected.y * 0.5 + 0.5) * height,
+        marginY,
+        height - marginY,
+      ),
+    });
+  });
+
+  Object.values(sides).forEach((items) => {
+    items.sort((a, b) => a.y - b.y);
+    for (let index = 1; index < items.length; index += 1) {
+      items[index].y = Math.max(
+        items[index].y,
+        items[index - 1].y + REGION_LABEL_MIN_GAP,
+      );
+    }
+
+    const overflow = items.at(-1)?.y - (height - marginY);
+    if (overflow > 0) {
+      items.forEach((item) => {
+        item.y -= overflow;
+      });
+    }
+
+    items.forEach(({ button, x, y }) => {
+      button.style.left = `${x}px`;
+      button.style.top = `${THREE.MathUtils.clamp(y, marginY, height - marginY)}px`;
+    });
+  });
+}
+
 function renderMemoryNodes() {
   if (!memoryNodeGroup) return;
 
@@ -767,7 +1864,8 @@ function renderMemoryNodes() {
   memoryNodes = [];
   memoryConnections = [];
 
-  memories.forEach((memory, index) => {
+  const filtered = getFilteredMemories();
+  filtered.forEach((memory, index) => {
     const state = memoryNodeState.get(memory.id);
     if (!state) return;
 
@@ -777,65 +1875,50 @@ function renderMemoryNodes() {
       0,
       1,
     );
-    const auraRegion = state.nodes.some(({ region }) => region === "amygdala")
-      ? "amygdala"
-      : state.dominantRegion;
-
-    state.nodes.forEach((activation, activationIndex) => {
-      const color =
-        REGION_ANCHORS[activation.region]?.color || DEFAULT_MEMORY_COLOR;
-      const radius = activation.isPrimary
-        ? THREE.MathUtils.lerp(
-            MIN_MEMORY_NODE_RADIUS,
-            MAX_MEMORY_NODE_RADIUS,
-            salience,
-          )
-        : THREE.MathUtils.lerp(
-            MIN_SUPPORT_NODE_RADIUS,
-            MAX_SUPPORT_NODE_RADIUS,
-            THREE.MathUtils.clamp(activation.weight * 1.5, 0, 1),
-          );
-      const material = new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: activation.isPrimary ? 1.4 : 0.85,
-        roughness: 0.16,
-        metalness: 0,
-        transparent: true,
-        opacity: activation.isPrimary ? 0.96 : 0.82,
-      });
-      const geometry = activation.isPrimary
-        ? createMemoryNodeGeometry(dominantType, radius)
-        : new THREE.SphereGeometry(radius, 16, 12);
-      const node = new THREE.Mesh(geometry, material);
-
-      node.name = `memory-node:${memory.id}:${activation.region}`;
-      node.position.set(...activation.position);
-      node.userData = {
-        memoryId: memory.id,
-        region: activation.region,
-        weight: activation.weight,
-        isPrimary: activation.isPrimary,
-        dominantType,
-        salience,
-        pulseOffset: index * 0.73 + activationIndex * 0.31,
-        selectionScale: 1,
-      };
-
-      if (activation.region === auraRegion) {
-        const aura = createEmotionAura(memory.extraction?.emotions, radius);
-        if (aura) node.add(aura);
-      }
-
-      memoryNodeGroup.add(node);
-      memoryNodes.push(node);
+    const radius = THREE.MathUtils.lerp(
+      MIN_MEMORY_NODE_RADIUS,
+      MAX_MEMORY_NODE_RADIUS,
+      salience,
+    );
+    const material = new THREE.MeshStandardMaterial({
+      color: DEFAULT_MEMORY_COLOR,
+      emissive: DEFAULT_MEMORY_COLOR,
+      emissiveIntensity: 0.3,
+      roughness: 0.16,
+      metalness: 0,
+      transparent: true,
+      opacity: 0.96,
     });
+    const node = new THREE.Mesh(
+      new THREE.SphereGeometry(radius, 20, 14),
+      material,
+    );
 
-    createConstellationConnections(memory.id, state);
+    node.name = `memory-core:${memory.id}`;
+    node.position.set(...state.core.position);
+    node.userData = {
+      memoryId: memory.id,
+      region: state.core.region,
+      weight: state.core.weight,
+      dominantType,
+      salience,
+      pulseOffset: index * 0.73,
+      selectionScale: 1,
+    };
+
+    const aura = createEmotionAura(memory.extraction?.emotions, radius);
+    if (aura) node.add(aura);
+
+    memoryNodeGroup.add(node);
+    memoryNodes.push(node);
+    createActivationConnections(memory.id, state);
   });
 
   updateMemoryNodeSelection();
-  focusSelectedMemory();
+  updateRegionMarkers();
+  updateRegionLabels();
+  renderEntityLens3D();
+  if (!entityLens) focusSelectedMemory();
 }
 
 function disposeGroupContents(group) {
@@ -845,113 +1928,108 @@ function disposeGroupContents(group) {
     if (object === group) return;
     object.geometry?.dispose();
     if (Array.isArray(object.material)) {
-      object.material.forEach((material) => material.dispose());
+      object.material.forEach((material) => {
+        material.map?.dispose();
+        material.dispose();
+      });
     } else {
+      object.material?.map?.dispose();
       object.material?.dispose();
     }
   });
 }
 
-function createConstellationConnections(memoryId, state) {
-  const primary = state.nodes.find(({ isPrimary }) => isPrimary);
-  if (!primary) return;
+function createActivationConnections(memoryId, state) {
+  const start = new THREE.Vector3(...state.core.position);
+  state.activations.forEach((activation) => {
+    const anchor = REGION_ANCHORS[activation.region];
+    if (!anchor) return;
 
-  const start = new THREE.Vector3(...primary.position);
-  state.nodes
-    .filter(({ isPrimary }) => !isPrimary)
-    .forEach((activation) => {
-      const end = new THREE.Vector3(...activation.position);
-      const control = start
-        .clone()
-        .add(end)
-        .multiplyScalar(0.5)
-        .lerp(new THREE.Vector3(), 0.28);
-      const curve = new THREE.QuadraticBezierCurve3(start, control, end);
-      const color =
-        REGION_ANCHORS[activation.region]?.color || DEFAULT_MEMORY_COLOR;
-      const radius = THREE.MathUtils.lerp(
-        MIN_CONNECTION_RADIUS,
-        MAX_CONNECTION_RADIUS,
-        Math.sqrt(THREE.MathUtils.clamp(activation.weight, 0, 1)),
-      );
-      const connection = new THREE.Group();
-      const tubeMaterial = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: THREE.MathUtils.lerp(0.12, 0.28, activation.weight),
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      });
-      const glowMaterial = new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.045,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.BackSide,
-      });
-      const tube = new THREE.Mesh(
-        new THREE.TubeGeometry(
-          curve,
-          CONNECTION_SEGMENTS,
-          radius,
-          6,
-          false,
-        ),
-        tubeMaterial,
-      );
-      const glow = new THREE.Mesh(
-        new THREE.TubeGeometry(
-          curve,
-          CONNECTION_SEGMENTS,
-          radius * 2.25,
-          6,
-          false,
-        ),
-        glowMaterial,
-      );
-      const flowParticles = Array.from(
-        { length: FLOW_PARTICLE_COUNT },
-        (_, index) => {
-          const particle = new THREE.Mesh(
-            new THREE.SphereGeometry(radius * 2.4, 10, 8),
-            new THREE.MeshBasicMaterial({
-              color,
-              transparent: true,
-              opacity: 0.92,
-              blending: THREE.AdditiveBlending,
-              depthWrite: false,
-            }),
-          );
-          particle.visible = false;
-          particle.userData.phase = index / FLOW_PARTICLE_COUNT;
-          connection.add(particle);
-          return particle;
-        },
-      );
-
-      connection.name = `memory-link:${memoryId}:${activation.region}`;
-      connection.renderOrder = 1;
-      connection.userData = {
-        memoryId,
-        region: activation.region,
-        weight: activation.weight,
-        curve,
-        tubeMaterial,
-        glowMaterial,
-        flowParticles,
-        flowSpeed: THREE.MathUtils.lerp(0.18, 0.42, activation.weight),
-      };
-      connection.add(glow, tube);
-      activationConnectionGroup.add(connection);
-      memoryConnections.push(connection);
+    const end = new THREE.Vector3(...anchor.position);
+    const control = start
+      .clone()
+      .add(end)
+      .multiplyScalar(0.5)
+      .lerp(new THREE.Vector3(), 0.28);
+    const curve = new THREE.QuadraticBezierCurve3(start, control, end);
+    const color = anchor.color;
+    const radius = THREE.MathUtils.lerp(
+      MIN_CONNECTION_RADIUS,
+      MAX_CONNECTION_RADIUS,
+      Math.sqrt(THREE.MathUtils.clamp(activation.weight, 0, 1)),
+    );
+    const connection = new THREE.Group();
+    const tubeMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.BackSide,
+    });
+    const tube = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, CONNECTION_SEGMENTS, radius, 6, false),
+      tubeMaterial,
+    );
+    const glow = new THREE.Mesh(
+      new THREE.TubeGeometry(
+        curve,
+        CONNECTION_SEGMENTS,
+        radius * 2.25,
+        6,
+        false,
+      ),
+      glowMaterial,
+    );
+    const flowParticles = Array.from(
+      { length: FLOW_PARTICLE_COUNT },
+      (_, index) => {
+        const particle = new THREE.Mesh(
+          new THREE.SphereGeometry(radius * 2.4, 10, 8),
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.92,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          }),
+        );
+        particle.visible = false;
+        particle.userData.phase = index / FLOW_PARTICLE_COUNT;
+        connection.add(particle);
+        return particle;
+      },
+    );
+
+    connection.name = `memory-link:${memoryId}:${activation.region}`;
+    connection.renderOrder = 1;
+    connection.userData = {
+      memoryId,
+      region: activation.region,
+      weight: activation.weight,
+      curve,
+      tubeMaterial,
+      glowMaterial,
+      flowParticles,
+      flowSpeed: THREE.MathUtils.lerp(0.18, 0.42, activation.weight),
+    };
+    connection.add(glow, tube);
+    activationConnectionGroup.add(connection);
+    memoryConnections.push(connection);
+  });
 }
 
 function animateActivationConnections(elapsed) {
   if (reduceMotion.matches) return;
 
-  const activeMemoryId = hoveredMemoryId || selectedMemoryId;
+  const activeMemoryId = getActiveMemoryId();
   memoryConnections.forEach((connection) => {
     if (connection.userData.memoryId !== activeMemoryId) return;
 
@@ -968,6 +2046,242 @@ function animateActivationConnections(elapsed) {
   });
 }
 
+function getPreviewRelationship() {
+  if (!entityLens?.graph || entityLens.previewRelationshipId == null) {
+    return null;
+  }
+  return entityLens.graph.relationships.find(
+    (relationship) =>
+      String(relationship.id) ===
+      String(entityLens.previewRelationshipId),
+  );
+}
+
+function renderEntityLens3D() {
+  if (!entityLensGroup) return;
+
+  disposeGroupContents(entityLensGroup);
+  entityLensGroup.clear();
+  entityLensHitTargets = [];
+  if (!entityLens?.graph) return;
+
+  const visibleIds = new Set(
+    getFilteredMemories().map((memory) => memory.id),
+  );
+  const { spokes } = buildEntitySpokes(entityLens.graph, visibleIds);
+  const originSpoke =
+    spokes.find(
+      (spoke) => spoke.memoryId === entityLens.originMemoryId,
+    ) || spokes[0];
+  const originNode = originSpoke
+    ? getMemoryCore(originSpoke.memoryId)
+    : null;
+  if (!originNode) return;
+
+  const entity = entityLens.graph.entity;
+  const color = ENTITY_KIND_COLORS[entity.kind] || DEFAULT_MEMORY_COLOR;
+  const hubPosition = calculateEntityHubPosition(
+    originNode.position.toArray(),
+    entity.id,
+  );
+  const hub = createEntityNode(
+    entity,
+    hubPosition,
+    ENTITY_HUB_RADIUS,
+    false,
+    entityLens.originMemoryId,
+  );
+  entityLensGroup.add(hub);
+
+  spokes.forEach((spoke) => {
+    const memoryNode = getMemoryCore(spoke.memoryId);
+    if (!memoryNode) return;
+    entityLensGroup.add(
+      createEntitySpoke(
+        new THREE.Vector3(...hubPosition),
+        memoryNode.position,
+        color,
+      ),
+    );
+  });
+
+  const relationship = getPreviewRelationship();
+  const counterpart = relationship
+    ? getRelationshipCounterpart(relationship, entity.id)
+    : null;
+  const direction = relationship
+    ? getRelationshipDirection(relationship, entity.id)
+    : null;
+  if (counterpart && direction) {
+    const previewPosition = calculateRelationshipPreviewPosition(
+      hubPosition,
+      counterpart.id,
+      direction,
+    );
+    const preview = createEntityNode(
+      counterpart,
+      previewPosition,
+      ENTITY_PREVIEW_RADIUS,
+      true,
+      relationship.memory_id,
+    );
+    const hubVector = new THREE.Vector3(...hubPosition);
+    const previewVector = new THREE.Vector3(...previewPosition);
+    const start = direction === "outgoing" ? hubVector : previewVector;
+    const end = direction === "outgoing" ? previewVector : hubVector;
+    entityLensGroup.add(
+      createRelationshipArrow(
+        start,
+        end,
+        ENTITY_KIND_COLORS[counterpart.kind] || color,
+      ),
+      preview,
+    );
+  }
+
+  if (!entityLens.hasFocused) {
+    hub.updateWorldMatrix(true, false);
+    focusCameraOnPoint(hub.getWorldPosition(new THREE.Vector3()));
+    entityLens.hasFocused = true;
+  }
+}
+
+function createEntityNode(
+  entity,
+  position,
+  radius,
+  isCounterpart,
+  originMemoryId,
+) {
+  const color = ENTITY_KIND_COLORS[entity.kind] || DEFAULT_MEMORY_COLOR;
+  const node = new THREE.Mesh(
+    new THREE.OctahedronGeometry(radius, 0),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: isCounterpart ? 0.8 : 1.05,
+      roughness: 0.18,
+      transparent: true,
+      opacity: 0.98,
+      depthWrite: false,
+    }),
+  );
+  const shell = new THREE.Mesh(
+    new THREE.OctahedronGeometry(radius * 1.34, 0),
+    new THREE.MeshBasicMaterial({
+      color,
+      wireframe: true,
+      transparent: true,
+      opacity: isCounterpart ? 0.36 : 0.52,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+
+  node.name = isCounterpart
+    ? `entity-preview:${entity.id}`
+    : `entity-hub:${entity.id}`;
+  node.position.set(...position);
+  node.renderOrder = 8;
+  node.userData = {
+    entity,
+    entityId: entity.id,
+    isEntityLensNode: true,
+    isCounterpart,
+    originMemoryId,
+  };
+  node.add(shell, createEntityLabelSprite(entity, color));
+  entityLensHitTargets.push(node);
+  return node;
+}
+
+function createEntityLabelSprite(entity, color) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 96;
+  const context = canvas.getContext("2d");
+  context.font = "500 28px DM Mono, monospace";
+  context.textAlign = "center";
+  context.fillStyle = "rgba(9, 14, 15, 0.82)";
+  context.fillRect(0, 14, canvas.width, 64);
+  context.strokeStyle = color;
+  context.strokeRect(1, 15, canvas.width - 2, 62);
+  context.fillStyle = color;
+  context.fillText(
+    `${entity.canonical_name} / ${entity.kind}`.toUpperCase(),
+    canvas.width / 2,
+    55,
+  );
+
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(canvas),
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  sprite.position.set(0, 0.34, 0);
+  sprite.scale.set(1.8, 0.34, 1);
+  sprite.renderOrder = 9;
+  return sprite;
+}
+
+function createEntitySpoke(start, end, color) {
+  const midpoint = start.clone().add(end).multiplyScalar(0.5);
+  if (midpoint.lengthSq()) midpoint.add(midpoint.clone().normalize().multiplyScalar(0.2));
+  const curve = new THREE.QuadraticBezierCurve3(
+    start.clone(),
+    midpoint,
+    end.clone(),
+  );
+  const group = new THREE.Group();
+  const tube = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 28, 0.012, 6, false),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.58,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  const glow = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 28, 0.027, 6, false),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.12,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.BackSide,
+    }),
+  );
+  group.add(glow, tube);
+  return group;
+}
+
+function createRelationshipArrow(start, end, color) {
+  const direction = end.clone().sub(start);
+  const length = direction.length();
+  const arrow = new THREE.ArrowHelper(
+    direction.normalize(),
+    start,
+    length,
+    color,
+    Math.min(0.18, length * 0.28),
+    0.1,
+  );
+  arrow.line.material.transparent = true;
+  arrow.line.material.opacity = 0.88;
+  arrow.line.material.depthWrite = false;
+  arrow.cone.material.transparent = true;
+  arrow.cone.material.opacity = 0.95;
+  arrow.cone.material.depthWrite = false;
+  arrow.renderOrder = 8;
+  return arrow;
+}
+
 function getDominantMemoryType(types) {
   let dominant = null;
 
@@ -982,24 +2296,6 @@ function getDominantMemoryType(types) {
   }
 
   return dominant?.type || null;
-}
-
-function createMemoryNodeGeometry(type, radius) {
-  if (type === "semantic") {
-    return new THREE.OctahedronGeometry(radius * 1.12, 0);
-  }
-  if (type === "procedural") {
-    return new THREE.TorusGeometry(radius * 0.82, radius * 0.28, 10, 24);
-  }
-  if (type === "spatial") {
-    const geometry = new THREE.ConeGeometry(radius * 0.9, radius * 2.2, 3);
-    geometry.rotateX(Math.PI);
-    return geometry;
-  }
-  if (type === "working") {
-    return new THREE.SphereGeometry(radius * 0.58, 16, 10);
-  }
-  return new THREE.SphereGeometry(radius, 20, 14);
 }
 
 function createEmotionAura(emotions, radius) {
@@ -1063,36 +2359,47 @@ function getEmotionAuraStyle(label) {
 }
 
 function updateMemoryNodeSelection() {
-  const activeMemoryId = hoveredMemoryId || selectedMemoryId;
+  const activeMemoryId = getActiveMemoryId();
+  const linkedIds = new Set(
+    entityLens?.graph?.memories.map((memory) => memory.id) || [],
+  );
+  const evidenceMemoryId = getPreviewRelationship()?.memory_id || null;
 
   memoryNodes.forEach((node) => {
     const selected = node.userData.memoryId === selectedMemoryId;
     const hovered = node.userData.memoryId === hoveredMemoryId;
     const active = hovered || selected;
-    const isPrimary = node.userData.isPrimary;
 
-    node.material.emissiveIntensity = hovered
-      ? isPrimary
+    if (entityLens) {
+      const linked = linkedIds.has(node.userData.memoryId);
+      const evidence = node.userData.memoryId === evidenceMemoryId;
+      node.material.emissiveIntensity = evidence
+        ? 1.25
+        : hovered
+          ? 1
+          : linked
+            ? 0.68
+            : 0.08;
+      node.material.opacity = evidence
         ? 1
-        : 0.78
-      : selected
-        ? isPrimary
-          ? 0.9
-          : 0.65
-        : isPrimary
-          ? 0.24
-          : 0.16;
-    node.material.opacity =
-      activeMemoryId != null && !active ? 0.28 : isPrimary ? 1 : 0.82;
-    node.userData.selectionScale = hovered
-      ? isPrimary
-        ? 1.28
-        : 1.42
-      : selected
-        ? isPrimary
-          ? 1.2
-          : 1.34
-        : 1;
+        : linked
+          ? evidenceMemoryId
+            ? 0.42
+            : 0.92
+          : 0.1;
+      node.userData.selectionScale = evidence
+        ? 1.35
+        : hovered
+          ? 1.25
+          : selected
+            ? 1.14
+            : 1;
+    } else {
+      node.material.emissiveIntensity = hovered ? 1 : selected ? 0.9 : 0.3;
+      node.material.opacity =
+        activeMemoryId != null && !active ? 0.24 : 0.96;
+      node.userData.selectionScale = hovered ? 1.28 : selected ? 1.2 : 1;
+    }
     node.scale.setScalar(node.userData.selectionScale);
   });
   updateActivationConnections();
@@ -1102,7 +2409,7 @@ function animateMemoryNodes(elapsed) {
   memoryNodes.forEach((node) => {
     const selectionScale = node.userData.selectionScale || 1;
     const workingPulse =
-      node.userData.isPrimary && node.userData.dominantType === "working"
+      node.userData.dominantType === "working"
         ? 1 + Math.sin(elapsed * 4.8 + node.userData.pulseOffset) * 0.16
         : 1;
     node.scale.setScalar(selectionScale * workingPulse);
@@ -1128,12 +2435,18 @@ function animateMemoryNodes(elapsed) {
 }
 
 function focusSelectedMemory() {
-  if (!brainCamera || !brainControls || !selectedMemoryId) return;
+  if (!brainCamera || !brainControls || !selectedMemoryId || entityLens) return;
 
-  const node = getPrimaryMemoryNode(selectedMemoryId);
+  const node = getMemoryCore(selectedMemoryId);
   if (!node) return;
 
   const target = node.getWorldPosition(new THREE.Vector3());
+  focusCameraOnPoint(target);
+}
+
+function focusCameraOnPoint(target) {
+  if (!brainCamera || !brainControls) return;
+
   const offset = brainCamera.position.clone().sub(brainControls.target);
   const distance = THREE.MathUtils.clamp(offset.length(), 4.5, 7);
 
@@ -1149,11 +2462,9 @@ function focusSelectedMemory() {
   brainControls.autoRotate = false;
 }
 
-function getPrimaryMemoryNode(memoryId) {
+function getMemoryCore(memoryId) {
   return memoryNodes.find(
-    (candidate) =>
-      candidate.userData.memoryId === memoryId &&
-      candidate.userData.isPrimary,
+    (candidate) => candidate.userData.memoryId === memoryId,
   );
 }
 
@@ -1161,8 +2472,12 @@ function setHoveredMemory(memoryId, event) {
   const hoverChanged = hoveredMemoryId !== memoryId;
   if (hoverChanged) {
     hoveredMemoryId = memoryId;
+    hoveredRegion = null;
     updateMemoryNodeSelection();
     updateRegionMarkers();
+    updateActivationConnections();
+    updateRegionLabels();
+    updateRegionInspectorSelection();
   }
 
   if (!memoryId) {
@@ -1190,6 +2505,12 @@ function renderMemoryHoverPanel(memory) {
   const dominantEmotion = getDominantEmotion(extraction.emotions);
   const rows = [
     ["Memory", memory.text],
+    [
+      "Activation",
+      `1 memory \u00b7 ${regions.length} active ${
+        regions.length === 1 ? "region" : "regions"
+      }`,
+    ],
     ["Type", dominantType ? capitalize(dominantType) : "Unclassified"],
     ["Emotion", formatEmotion(dominantEmotion)],
     [
@@ -1294,15 +2615,23 @@ function renderBrainModel() {
     controls.autoRotate = false;
   });
 
+  brainCanvas.addEventListener(
+    "wheel",
+    (event) => event.preventDefault(),
+    { passive: false },
+  );
+
   brainCanvas.addEventListener("mouseenter", () => {
     controls.autoRotate = false;
   });
   brainCanvas.addEventListener("mouseleave", () => {
     setHoveredMemory(null);
-    controls.autoRotate = selectedMemoryId == null;
+    setHoveredRegion(null);
+    controls.autoRotate = selectedMemoryId == null && entityLens == null;
   });
   brainCanvas.addEventListener("pointercancel", () => {
     setHoveredMemory(null);
+    setHoveredRegion(null);
   });
 
   brainCanvas.addEventListener("pointermove", (event) => {
@@ -1312,8 +2641,39 @@ function renderBrainModel() {
       -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
     );
     raycaster.setFromCamera(pointer, camera);
-    const [hit] = raycaster.intersectObjects(memoryNodes, false);
-    setHoveredMemory(hit?.object.userData.memoryId || null, event);
+    const [entityHit] = raycaster.intersectObjects(
+      entityLensHitTargets,
+      false,
+    );
+    if (entityHit) {
+      setHoveredMemory(null);
+      setHoveredRegion(null);
+      brainCanvas.style.cursor = entityHit.object.userData.isCounterpart
+        ? "pointer"
+        : "default";
+      return;
+    }
+
+    const [memoryHit] = raycaster.intersectObjects(memoryNodes, false);
+    if (memoryHit) {
+      setHoveredRegion(null);
+      setHoveredMemory(memoryHit.object.userData.memoryId, event);
+      return;
+    }
+
+    const activeMarkerTargets = selectedMemoryId
+      ? regionMarkerHitTargets.filter((target) => target.parent?.visible)
+      : [];
+    const [regionHit] = raycaster.intersectObjects(activeMarkerTargets, false);
+    if (regionHit) {
+      setHoveredMemory(null);
+      setHoveredRegion(regionHit.object.userData.region);
+      brainCanvas.style.cursor = "pointer";
+      return;
+    }
+
+    setHoveredMemory(null);
+    setHoveredRegion(null);
   });
 
   brainCanvas.addEventListener("pointerdown", (event) => {
@@ -1332,8 +2692,31 @@ function renderBrainModel() {
       -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
     );
     raycaster.setFromCamera(pointer, camera);
-    const [hit] = raycaster.intersectObjects(memoryNodes, false);
-    if (hit) selectMemory(hit.object.userData.memoryId);
+    const [entityHit] = raycaster.intersectObjects(
+      entityLensHitTargets,
+      false,
+    );
+    if (entityHit) {
+      const { entity, isCounterpart, originMemoryId } =
+        entityHit.object.userData;
+      if (isCounterpart) {
+        focusEntity(entity.id, originMemoryId, { entity });
+      }
+      return;
+    }
+
+    const [memoryHit] = raycaster.intersectObjects(memoryNodes, false);
+    if (memoryHit) {
+      selectMemory(memoryHit.object.userData.memoryId);
+      return;
+    }
+
+    const activeMarkerTargets = selectedMemoryId
+      ? regionMarkerHitTargets.filter((target) => target.parent?.visible)
+      : [];
+    const [regionHit] = raycaster.intersectObjects(activeMarkerTargets, false);
+    if (regionHit) selectRegion(regionHit.object.userData.region);
+    else clearSelection();
   });
 
   const keyLight = new THREE.DirectionalLight(0xfff3df, 5.2);
@@ -1363,10 +2746,13 @@ function renderBrainModel() {
     memoryNodeGroup.name = "memory-nodes";
     activationConnectionGroup = new THREE.Group();
     activationConnectionGroup.name = "activation-connections";
+    entityLensGroup = new THREE.Group();
+    entityLensGroup.name = "entity-lens";
     brainContent.add(
       model,
       createRegionAnchorGroup(),
       activationConnectionGroup,
+      entityLensGroup,
       memoryNodeGroup,
     );
     brain.add(brainContent);
@@ -1405,14 +2791,10 @@ function renderBrainModel() {
     if (hasActiveRegionMarkers && !reduceMotion.matches) {
       const elapsed = performance.now() * 0.004;
       regionMarkers.forEach((marker) => {
-        const { isDeepRegion, weight, markerScale } = marker.userData;
+        const { weight } = marker.userData;
         if (!weight) return;
         const pulse = 1 + Math.sin(elapsed) * (0.03 + weight * 0.05);
-        marker.scale.setScalar(
-          markerScale *
-            (isDeepRegion ? 1.1 + weight * 0.55 : 0.85 + weight * 0.75) *
-            pulse,
-        );
+        marker.scale.setScalar(getRegionMarkerScale(marker, pulse));
       });
     }
     if (!reduceMotion.matches) {
@@ -1420,6 +2802,7 @@ function renderBrainModel() {
       animateMemoryNodes(elapsed);
       animateActivationConnections(elapsed);
     }
+    updateRegionLabelPositions(camera);
     renderer.render(scene, camera);
     requestAnimationFrame(animate);
   }

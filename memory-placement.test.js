@@ -42,12 +42,12 @@ test("separates memories that share a dominant anchor without insertion order", 
   ]);
 
   assert.deepEqual(
-    after.get("mem_first").position,
-    before.get("mem_first").position,
+    after.get("mem_first").core.position,
+    before.get("mem_first").core.position,
   );
   assert.deepEqual(
-    after.get("mem_second").position,
-    before.get("mem_second").position,
+    after.get("mem_second").core.position,
+    before.get("mem_second").core.position,
   );
 });
 
@@ -74,33 +74,34 @@ test("keeps every region's memory positions inside its anchor", () => {
   }
 });
 
-test("stores one ordered node per activated region", () => {
+test("stores one canonical core and ordered region activations", () => {
   const state = createMemoryNodeState([{ id: "mem_state", regions }]);
 
   assert.deepEqual(state.get("mem_state"), {
-    dominantRegion: "prefrontal",
-    position: calculateMemoryPosition("mem_state", regions),
-    nodes: [
+    core: {
+      region: "prefrontal",
+      weight: 0.65,
+      position: calculateMemoryPosition("mem_state", regions),
+    },
+    activations: [
       {
         region: "prefrontal",
         weight: 0.65,
-        isPrimary: true,
-        position: calculateRegionPosition("mem_state", "prefrontal"),
+        isDominant: true,
       },
       {
         region: "hippocampus",
         weight: 0.35,
-        isPrimary: false,
-        position: calculateRegionPosition("mem_state", "hippocampus"),
+        isDominant: false,
       },
     ],
   });
 });
 
-test("keeps every constellation node near its own region", () => {
+test("keeps one core regardless of how many regions participate", () => {
   const state = createMemoryNodeState([
     {
-      id: "mem_constellation",
+      id: "mem_multi_region",
       regions: [
         { region: "hippocampus", weight: 0.5 },
         { region: "amygdala", weight: 0.2 },
@@ -108,18 +109,22 @@ test("keeps every constellation node near its own region", () => {
         { region: "prefrontal", weight: 0.1 },
       ],
     },
-  ]).get("mem_constellation");
+  ]).get("mem_multi_region");
 
-  assert.equal(state.nodes.length, 4);
-  for (const node of state.nodes) {
-    assert.deepEqual(
-      node.position,
-      calculateRegionPosition("mem_constellation", node.region),
-    );
-  }
+  assert.equal(Object.hasOwn(state, "core"), true);
+  assert.equal(state.activations.length, 4);
+  assert.deepEqual(
+    state.core.position,
+    calculateMemoryPosition("mem_multi_region", [
+      { region: "hippocampus", weight: 0.5 },
+      { region: "amygdala", weight: 0.2 },
+      { region: "temporalCortex", weight: 0.2 },
+      { region: "prefrontal", weight: 0.1 },
+    ]),
+  );
 });
 
-test("constellation ordering is stable when activations arrive reordered", () => {
+test("activation ordering is stable when regions arrive reordered", () => {
   const memory = { id: "mem_ordered", regions };
   const first = createMemoryNodeState([memory]).get(memory.id);
   const second = createMemoryNodeState([
@@ -127,6 +132,25 @@ test("constellation ordering is stable when activations arrive reordered", () =>
   ]).get(memory.id);
 
   assert.deepEqual(first, second);
+});
+
+test("represents swimming as one core with three weighted footprints", () => {
+  const swimmingRegions = [
+    { region: "basalGanglia", weight: 0.45 },
+    { region: "cerebellum", weight: 0.35 },
+    { region: "motorCortex", weight: 0.2 },
+  ];
+  const state = createMemoryNodeState([
+    { id: "mem_swimming", regions: swimmingRegions },
+  ]).get("mem_swimming");
+
+  assert.equal(state.core.region, "basalGanglia");
+  assert.equal(state.core.weight, 0.45);
+  assert.deepEqual(state.activations, [
+    { region: "basalGanglia", weight: 0.45, isDominant: true },
+    { region: "cerebellum", weight: 0.35, isDominant: false },
+    { region: "motorCortex", weight: 0.2, isDominant: false },
+  ]);
 });
 
 test("omits memories without a known region anchor", () => {
