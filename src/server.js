@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 import { pathToFileURL } from "url";
 import { randomUUID } from "crypto";
+import { existsSync } from "fs";
 import { compareMemories, extractMemory } from "./llm.js";
 import { model } from "./llm-config.js";
 import {
@@ -56,8 +57,13 @@ import {
 const log = createLogger("server");
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "public");
-const sharedDir = join(__dirname, "shared");
 const PORT = process.env.PORT || 3000;
+
+// The Vite-built React SPA (npm run build:web) emits here. React Router owns all
+// client routes; the SPA is the only frontend (run the build before starting).
+const spaDir = join(publicDir, "app");
+const spaIndex = join(spaDir, "index.html");
+const hasSpa = existsSync(spaIndex);
 
 const defaultDependencies = {
   backfillRegionActivations,
@@ -102,8 +108,14 @@ export function createNeurogramApp(overrides = {}) {
   dependencies.getDb();
   dependencies.backfillRegionActivations();
   app.use(express.json());
-  app.use(express.static(publicDir));
-  app.use("/js", express.static(sharedDir));
+  // Serve the Vite-built SPA assets first so /assets/index-<hash>.js resolves
+  // from public/app/assets, then fall through to public/assets for static files
+  // the SPA loads by absolute path (e.g. /assets/brain.obj, /fonts/*). Mounting
+  // the app dir first keeps ordering correct (app/assets wins; misses fall
+  // through to public/assets).
+  app.use(express.static(spaDir, { index: false }));
+  // Do not auto-serve index.html at "/"; the SPA owns that route.
+  app.use(express.static(publicDir, { index: false }));
   app.set("etag", false);
 
   app.use((req, res, next) => {
@@ -519,15 +531,38 @@ export function createNeurogramApp(overrides = {}) {
     }
   });
 
-  app.get(["/memories", "/entities"], (_req, res) => {
-    res.sendFile(join(publicDir, "catalog.html"));
-  });
-  app.get("/memories/compare", (_req, res) => {
-    res.sendFile(join(publicDir, "compare.html"));
-  });
-  app.get("/graph", (_req, res) => {
-    res.sendFile(join(publicDir, "graph.html"));
-  });
+  // All client routes are owned by the React SPA: serve the built shell and let
+  // React Router resolve the view. Requires `npm run build:web` (public/app/).
+  if (hasSpa) {
+    const spaRoutes = [
+      "/",
+      "/landing",
+      "/atlas",
+      "/memories",
+      "/entities",
+      "/memories/compare",
+      "/graph",
+    ];
+    app.get(spaRoutes, (_req, res) => {
+      res.sendFile(spaIndex);
+    });
+
+    // Deep-link fallback: any other non-API GET that accepts HTML gets the SPA
+    // shell so client-side routes work on refresh. Excludes API/static prefixes.
+    app.get("*", (req, res, next) => {
+      if (
+        req.method !== "GET"
+        || req.path.startsWith("/api")
+        || req.path.startsWith("/js")
+        || req.path.startsWith("/assets")
+        || req.path.startsWith("/fonts")
+      ) {
+        return next();
+      }
+      if (!req.accepts("html")) return next();
+      res.sendFile(spaIndex);
+    });
+  }
 
   return app;
 }

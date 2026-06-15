@@ -1,0 +1,425 @@
+/* ============================================================================
+   Compare page — phosphor lab instrument / archival neuro-terminal.
+   No bento cards, no status bars, no eyebrows. Hairline dividers group regions.
+   Headings/large text → var(--font-serif); UI/data/labels → var(--font-mono).
+   ========================================================================== */
+
+.page {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: 40px 28px 96px;
+}
+
+/* ---- header --------------------------------------------------------------- */
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.title {
+  font-family: var(--font-serif);
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  color: var(--green-bright);
+  text-shadow: var(--glow-soft);
+}
+
+.lede {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  max-width: 60ch;
+  margin: 0;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* ---- inline notices (NOT status bars) ------------------------------------- */
+.notice {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted);
+  margin: 24px 0;
+  line-height: 1.6;
+}
+.noticeError {
+  color: var(--green);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  margin-top: 28px;
+}
+
+/* ---- memory pair: two columns split by a vertical hairline ---------------- */
+.memoryPair {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  gap: 0 32px;
+  align-items: start;
+}
+
+.vrule {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line);
+}
+
+.memoryColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.colLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+}
+
+.memoryTitle {
+  font-family: var(--font-serif);
+  font-size: 1.7rem;
+  color: var(--green-bright);
+}
+
+.memoryText {
+  font-family: var(--font-mono);
+  color: var(--text);
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.memorySummary {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  margin: 0;
+  font-size: 13px;
+}
+
+/* ---- meta description lists ---------------------------------------------- */
+.metaGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 18px;
+  margin: 4px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.metaGrid dt {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.metaGrid dd {
+  margin: 0;
+  color: var(--text);
+}
+.metaPair {
+  display: contents;
+}
+
+/* ---- chips / tags -------------------------------------------------------- */
+.tagGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+}
+.chipKind {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: lowercase;
+}
+
+/* ---- sections ------------------------------------------------------------ */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.sectionTitle {
+  font-family: var(--font-serif);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  color: var(--green-bright);
+}
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--green);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.overview {
+  font-family: var(--font-mono);
+  color: var(--text);
+  max-width: 80ch;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* ---- shared list / labels ------------------------------------------------ */
+.subheading {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--green);
+  margin: 0;
+}
+.count {
+  color: var(--muted);
+}
+.listLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  font-weight: 400;
+}
+.plainList {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.empty {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--faint);
+}
+
+/* ---- analysis findings --------------------------------------------------- */
+.findings {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.findingSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.findingItem {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.findingTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.findingStatement {
+  font-family: var(--font-mono);
+  color: var(--text);
+  margin: 0;
+}
+
+/* evidence quote — accent border + inset bg (a quote block, not a card) */
+.evidencePair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.evidence {
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--inset);
+  border-left: 2px solid var(--green);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.55;
+}
+.evidenceSide {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+  font-weight: 400;
+}
+
+/* ---- structural diff grid ------------------------------------------------ */
+.diffGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 28px 32px;
+}
+.diffSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.diffList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.diffSides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* ---- activation findings ------------------------------------------------- */
+.activationFindings {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.activationFinding {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.activationHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.activationExplain {
+  font-family: var(--font-mono);
+  color: var(--text);
+  margin: 0;
+  line-height: 1.55;
+}
+.activationRole {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.notes {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.notes li {
+  padding-left: 16px;
+  position: relative;
+}
+.notes li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--green-dim);
+}
+
+/* ---- region diff table — clean instrument-style hairline rows ------------- */
+.tableFrame {
+  overflow-x: auto;
+  margin-top: 8px;
+}
+.regionTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.regionTable th {
+  text-align: left;
+  padding: 10px 14px;
+  font-weight: 400;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+.regionTable td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  white-space: nowrap;
+}
+.regionTable tbody tr:hover td {
+  background: var(--inset);
+}
+
+/* ---- responsive ---------------------------------------------------------- */
+@media (max-width: 760px) {
+  .memoryPair {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .vrule {
+    display: none;
+  }
+  .evidencePair,
+  .diffSides {
+    grid-template-columns: 1fr;
+  }
+}

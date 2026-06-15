@@ -1,0 +1,269 @@
+/* ============================================================================
+   NEUROGRAM — "phosphor lab instrument" design system
+   Two-tier type: Departure Mono (instrument/data) + Instrument Serif (journal).
+   Strictly phosphor-green on near-black. No cards, no status bars, no eyebrows.
+   ========================================================================== */
+
+@font-face {
+  font-family: "Departure Mono";
+  src:
+    url("/fonts/DepartureMono-Regular.woff2") format("woff2"),
+    url("/fonts/DepartureMono-Regular.woff") format("woff");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* surfaces */
+  --bg: #060807;
+  --bg-2: #0a0d0b;
+  --inset: rgba(18, 30, 23, 0.35);
+  --inset-strong: rgba(24, 40, 30, 0.55);
+
+  /* phosphor greens — the only chrome hue */
+  --green: #4ef08f;
+  --green-bright: #9bffc7;
+  --green-mid: #2fbf74;
+  --green-dim: #1f6e46;
+
+  /* text */
+  --text: #c4e8d4;
+  --muted: #5f8270;
+  --faint: #3c5648;
+
+  /* lines */
+  --line: rgba(78, 240, 143, 0.14);
+  --line-soft: rgba(78, 240, 143, 0.08);
+  --line-strong: rgba(78, 240, 143, 0.34);
+
+  /* glow */
+  --glow: 0 0 0.5em rgba(78, 240, 143, 0.45);
+  --glow-soft: 0 0 18px rgba(78, 240, 143, 0.12);
+
+  --font-mono: "Departure Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-serif: "Instrument Serif", "Times New Roman", Georgia, serif;
+
+  --maxw: 1320px;
+  --radius: 2px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scrollbar-color: var(--green-dim) transparent;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* Atmosphere: phosphor vignette + faint horizontal scanlines (CRT, not gloss) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(47, 191, 116, 0.08), transparent 60%),
+    radial-gradient(90% 60% at 100% 110%, rgba(31, 110, 70, 0.07), transparent 55%);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.45;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.16) 3px,
+    rgba(0, 0, 0, 0) 4px
+  );
+  mix-blend-mode: multiply;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(78, 240, 143, 0.28);
+  color: var(--green-bright);
+}
+
+a {
+  color: var(--green);
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.02;
+  margin: 0;
+  color: var(--green-bright);
+}
+
+/* ---- text helpers ------------------------------------------------------- */
+.mono { font-family: var(--font-mono); }
+.serif { font-family: var(--font-serif); }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.upper { text-transform: uppercase; letter-spacing: 0.18em; }
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- primitives --------------------------------------------------------- */
+
+/* flat, divider-separated region — NOT a bento card */
+.nrg-divider {
+  height: 1px;
+  border: 0;
+  background: var(--line);
+  margin: 0;
+}
+
+.rule-label {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.rule-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.nrg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  background: transparent;
+  color: var(--green);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.nrg-btn:hover:not(:disabled) {
+  background: rgba(78, 240, 143, 0.1);
+  border-color: var(--green);
+  color: var(--green-bright);
+  box-shadow: var(--glow-soft);
+}
+.nrg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.nrg-btn--solid {
+  background: var(--green);
+  color: #04130b;
+  border-color: var(--green);
+  font-weight: 400;
+}
+.nrg-btn--solid:hover:not(:disabled) {
+  background: var(--green-bright);
+  color: #04130b;
+  box-shadow: var(--glow);
+}
+
+.nrg-field {
+  width: 100%;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 10px 12px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+.nrg-field::placeholder { color: var(--faint); }
+.nrg-field:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: var(--glow-soft);
+}
+
+/* terminal-style row list — replaces cards/tables where it reads better */
+.terminal-list { display: flex; flex-direction: column; }
+.terminal-row {
+  display: flex;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* entity / type chips — outline only, monochrome by default */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  text-transform: lowercase;
+}
+.chip::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+  body::after { display: none; }
+}
