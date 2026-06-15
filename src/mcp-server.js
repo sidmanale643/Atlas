@@ -17,6 +17,7 @@ import {
   getRegionActivations,
   getRelationshipsForMemory,
   getStructuralMemoryLinks,
+  searchMemoriesFts,
   storeMemory,
   updateMemoryGraph,
   updateMemorySummary,
@@ -25,6 +26,7 @@ import { getRelatedMemories as deriveRelatedMemories } from "./related-memories.
 import { AddMemorySchema } from "./schemas.js";
 import {
   deleteMemoryVector,
+  hybridSearchMemories,
   indexMemoryVector,
   searchMemoryVectors,
 } from "./vector-store.js";
@@ -97,6 +99,7 @@ function defaultDependencies() {
         getMemory: dependencies.getMemory,
         getStructuralMemoryLinks: dependencies.getStructuralMemoryLinks,
         searchMemoryVectors: dependencies.searchMemoryVectors,
+        searchMemoriesFts,
         serializeMemory: (memory) => ({
           ...memory,
           extraction: dependencies.getLatestExtraction(memory.id),
@@ -284,7 +287,7 @@ export function createNeurogramMcpServer(overrides = {}) {
     {
       title: "Search memories",
       description:
-        "Find memories semantically related to a natural-language query using Sentence Transformers embeddings stored in Qdrant. THIS IS THE PRIMARY WAY TO RECALL MEMORIES. Call this BEFORE asking the user to repeat information, and before `add_memory`, to avoid creating duplicates. Use a short descriptive query such as 'user's coffee preference' or 'project decisions last week'. Returns memories with a `similarity` score, the full memory payload, and extraction data. Supports `limit` (1-100, default 20) and an optional `scoreThreshold` in -1..1 to filter low-relevance hits. Requires Qdrant credentials. Use `find_entities` instead when you need a known person/place/concept, and `list_memories` for a chronological browse.",
+        "Find memories using hybrid search (semantic + keyword). THIS IS THE PRIMARY WAY TO RECALL MEMORIES. Call this BEFORE asking the user to repeat information, and before `add_memory`, to avoid creating duplicates. Use a short descriptive query such as 'user's coffee preference' or 'project decisions last week'. Returns memories with a `rrfScore` (reciprocal rank fusion score). Supports `limit` (1-100, default 20), `scoreThreshold` in -1..1, and `strategy` ('hybrid', 'vector', or 'bm25', default 'hybrid'). Use `find_entities` instead when you need a known person/place/concept, and `list_memories` for a chronological browse.",
       inputSchema: {
         query: z
           .string()
@@ -307,20 +310,28 @@ export function createNeurogramMcpServer(overrides = {}) {
           .describe(
             "Optional minimum similarity score in -1..1; lower returns more permissive results"
           ),
+        strategy: z
+          .enum(["hybrid", "vector", "bm25"])
+          .default("hybrid")
+          .describe(
+            "Search strategy: 'hybrid' (default) combines semantic + BM25, 'vector' is semantic-only, 'bm25' is keyword-only"
+          ),
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ query, limit, scoreThreshold }) => {
+    async ({ query, limit, scoreThreshold, strategy }) => {
       try {
-        const hits = await dependencies.searchMemoryVectors(query, {
+        const hits = await hybridSearchMemories(query, {
           limit,
           scoreThreshold,
+          strategy,
+          searchMemoriesFts,
         });
         const memories = hits.flatMap(({ id, score }) => {
           const memory = getMemoryDetails(id);
-          return memory ? [{ ...memory, similarity: score }] : [];
+          return memory ? [{ ...memory, rrfScore: score }] : [];
         });
-        return toolResult({ query, memories });
+        return toolResult({ query, strategy, memories });
       } catch (error) {
         return toolError(`Could not search memories: ${error.message}`);
       }
@@ -332,7 +343,7 @@ export function createNeurogramMcpServer(overrides = {}) {
     {
       title: "Get related memories",
       description:
-        "Find memories connected to a given memory through THREE signals combined: shared entities, shared subject-predicate-object relationships, and semantic similarity. Use this AFTER obtaining a memory ID from `search_memories` or `add_memory` to expand context, surface contradictions, or follow a thread (e.g. 'what else do we know about Maya?'). Returns a ranked list of related memories with combined score, human-readable reasons, shared entities, shared relationships, and a `semanticAvailable` flag indicating whether Qdrant contributed. Supports `limit` (1-20, default 5) and `scoreThreshold` in -1..1 (default 0.65). Returns an error if `id` does not exist. This is NOT a general search - start with `search_memories` when you have a free-text question.",
+        "Find memories connected to a given memory through FOUR signals combined: shared entities, shared subject-predicate-object relationships, semantic similarity, and BM25 keyword relevance. Use this AFTER obtaining a memory ID from `search_memories` or `add_memory` to expand context, surface contradictions, or follow a thread (e.g. 'what else do we know about Maya?'). Returns a ranked list of related memories with combined score, human-readable reasons, shared entities, shared relationships, and `semanticAvailable`/`bm25Available` flags. Supports `limit` (1-20, default 5) and `scoreThreshold` in -1..1 (default 0.65). Returns an error if `id` does not exist. This is NOT a general search - start with `search_memories` when you have a free-text question.",
       inputSchema: {
         id: z
           .string()

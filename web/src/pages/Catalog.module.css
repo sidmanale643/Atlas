@@ -119,7 +119,7 @@
   border: 1px solid var(--line-strong);
   border-left: 2px solid var(--green);
   border-radius: var(--radius);
-  background: rgba(78, 240, 143, 0.04);
+  background: rgba(56, 130, 246, 0.04);
 }
 
 .compareInfo {
@@ -218,11 +218,11 @@
   transition: background 0.14s ease;
 }
 .row:hover {
-  background: rgba(78, 240, 143, 0.05);
+  background: rgba(56, 130, 246, 0.05);
 }
 
 .rowExpanded {
-  background: rgba(78, 240, 143, 0.05);
+  background: rgba(56, 130, 246, 0.05);
 }
 
 /* primary cell */

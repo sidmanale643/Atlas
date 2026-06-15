@@ -254,3 +254,71 @@ export const deleteMemoryVector = (memoryId) =>
   getDefaultStore().deleteMemory(memoryId);
 export const deleteAllMemoryVectors = () =>
   getDefaultStore().deleteAllMemories();
+
+const RRF_K = 60;
+
+export async function hybridSearchMemories(
+  query,
+  { limit = 10, strategy = "hybrid", scoreThreshold, searchMemoriesFts } = {},
+) {
+  if (strategy === "bm25") {
+    return bm25OnlySearch(query, { limit, scoreThreshold, searchMemoriesFts });
+  }
+
+  const vectorResultsPromise = searchMemoryVectors(query, {
+    limit: Math.max(limit * 3, 30),
+    scoreThreshold,
+  }).catch(() => []);
+
+  const bm25ResultsPromise = Promise.resolve(
+    searchMemoriesFts
+      ? searchMemoriesFts(query, { limit: Math.max(limit * 3, 30) })
+      : [],
+  );
+
+  const [vectorResults, bm25Results] = await Promise.all([
+    vectorResultsPromise,
+    bm25ResultsPromise,
+  ]);
+
+  if (strategy === "vector") {
+    return vectorResults;
+  }
+
+  return fuseWithRrf(vectorResults, bm25Results, limit);
+}
+
+function bm25OnlySearch(query, { limit, scoreThreshold, searchMemoriesFts }) {
+  const bm25Results = searchMemoriesFts
+    ? searchMemoriesFts(query, { limit })
+    : [];
+  if (!scoreThreshold) return bm25Results;
+  const maxScore = Math.max(...bm25Results.map((r) => r.score), 0);
+  if (maxScore === 0) return bm25Results;
+  return bm25Results.filter(
+    (r) => Math.abs(r.score / maxScore) >= Math.abs(scoreThreshold),
+  );
+}
+
+export function fuseWithRrf(vectorResults, bm25Results, limit) {
+  const scores = new Map();
+
+  for (let rank = 0; rank < vectorResults.length; rank++) {
+    const { id } = vectorResults[rank];
+    const existing = scores.get(id) || 0;
+    scores.set(id, existing + 1 / (RRF_K + rank + 1));
+  }
+
+  for (let rank = 0; rank < bm25Results.length; rank++) {
+    const { id } = bm25Results[rank];
+    const existing = scores.get(id) || 0;
+    scores.set(id, existing + 1 / (RRF_K + rank + 1));
+  }
+
+  const fused = [...scores.entries()]
+    .map(([id, score]) => ({ id, score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return fused;
+}

@@ -1,6 +1,6 @@
 /* ============================================================================
    ATLAS — Neurogram memory atlas page (global stylesheet, literal class names)
-   Phosphor lab instrument: phosphor green on near-black. Two type tiers:
+   Phosphor lab instrument: blue on near-black. Two type tiers:
    Instrument Serif for headings, Departure Mono for all UI/data. No bento
    cards, no status bars, no eyebrows. Tokens from web/src/theme/theme.css.
    The 3D brain (viz/brain/app.js) is untouched; we only style its scaffold.
@@ -108,7 +108,7 @@
   width: 100%;
   padding: 11px 16px;
   background: var(--green);
-  color: #04130b;
+  color: #000000;
   border: 1px solid var(--green);
   border-radius: var(--radius);
   font-family: var(--font-mono);
@@ -223,10 +223,10 @@
 }
 .filter-button:hover {
   color: var(--green-bright);
-  background: rgba(78, 240, 143, 0.08);
+  background: rgba(56, 130, 246, 0.08);
 }
 .filter-button.active {
-  color: #04130b;
+  color: #000000;
   background: var(--green);
 }
 
@@ -267,10 +267,7 @@
 }
 .text-button[hidden] { display: none; }
 
-/* ==========================================================================
-   BRAIN STAGE — fixed sizing required by app.js (keep min-height 510px)
-   Recolored from legacy cyan to subtle phosphor green.
-   ========================================================================== */
+/* brain stage — fixed sizing required by app.js (keep min-height 510px) */
 .brain-stage {
   position: relative;
   display: grid;
@@ -281,9 +278,9 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background:
-    linear-gradient(rgba(78, 240, 143, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(78, 240, 143, 0.035) 1px, transparent 1px),
-    radial-gradient(circle at 50% 48%, rgba(78, 240, 143, 0.1), transparent 42%),
+    linear-gradient(rgba(56, 130, 246, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 130, 246, 0.035) 1px, transparent 1px),
+    radial-gradient(circle at 50% 48%, rgba(56, 130, 246, 0.1), transparent 42%),
     var(--bg-2);
   background-size: 42px 42px, 42px 42px, auto, auto;
 }
@@ -294,8 +291,8 @@
   width: 520px;
   height: 400px;
   border-radius: 50%;
-  border: 1px solid rgba(78, 240, 143, 0.08);
-  background: radial-gradient(circle, rgba(78, 240, 143, 0.07), transparent 67%);
+  border: 1px solid rgba(56, 130, 246, 0.08);
+  background: radial-gradient(circle, rgba(56, 130, 246, 0.07), transparent 67%);
   filter: blur(15px);
 }
 
@@ -304,11 +301,11 @@
   position: absolute;
   z-index: 1;
   inset: 12% 18%;
-  border: 1px solid rgba(78, 240, 143, 0.08);
+  border: 1px solid rgba(56, 130, 246, 0.08);
   border-radius: 50%;
   box-shadow:
-    0 0 70px rgba(78, 240, 143, 0.05),
-    inset 0 0 70px rgba(78, 240, 143, 0.04);
+    0 0 70px rgba(56, 130, 246, 0.05),
+    inset 0 0 70px rgba(56, 130, 246, 0.04);
   pointer-events: none;
 }
 
@@ -392,21 +389,21 @@
 .key-memory {
   border-radius: 50%;
   background: var(--green-bright);
-  box-shadow: 0 0 8px rgba(155, 255, 199, 0.6);
+  box-shadow: 0 0 8px rgba(107, 163, 255, 0.6);
 }
 
 .key-region {
   border: 1px solid var(--green);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(78, 240, 143, 0.55), transparent 68%);
-  box-shadow: 0 0 10px rgba(78, 240, 143, 0.5);
+  background: radial-gradient(circle, rgba(56, 130, 246, 0.55), transparent 68%);
+  box-shadow: 0 0 10px rgba(56, 130, 246, 0.5);
 }
 
 .key-path {
   width: 15px !important;
   height: 1px !important;
   background: linear-gradient(90deg, transparent, var(--green), transparent);
-  box-shadow: 0 0 5px rgba(78, 240, 143, 0.7);
+  box-shadow: 0 0 5px rgba(56, 130, 246, 0.7);
 }
 
 /* entity dots — small distinct, muted hues (describe the brain's encoding) */
@@ -456,7 +453,7 @@
   padding: 7px 9px;
   border: 1px solid color-mix(in srgb, var(--region-color, var(--green)) 42%, transparent);
   border-radius: 999px;
-  background: rgba(6, 8, 7, 0.85);
+  background: rgba(17, 19, 24, 0.85);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(12px);
   color: var(--text);
@@ -488,7 +485,7 @@
 .region-label:focus-visible,
 .region-label.is-focused {
   border-color: var(--region-color, var(--green));
-  background: rgba(10, 16, 13, 0.96);
+  background: rgba(17, 19, 24, 0.96);
   outline: none;
   transform: translate(-50%, -50%) scale(1.06);
 }
@@ -503,7 +500,7 @@
   margin: 0;
   padding: 9px 11px;
   border-left: 2px solid var(--green);
-  background: rgba(6, 8, 7, 0.75);
+  background: rgba(17, 19, 24, 0.75);
   color: var(--text);
   pointer-events: none;
   transform: translateY(-50%);
@@ -523,7 +520,7 @@
   padding: 14px 15px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: rgba(6, 8, 7, 0.92);
+  background: rgba(17, 19, 24, 0.92);
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.5), var(--glow-soft);
   backdrop-filter: blur(18px);
   color: var(--text);

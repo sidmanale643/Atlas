@@ -55,6 +55,48 @@ const DEEP_BRAIN_REGIONS = new Set([
   "amygdala",
   "basalGanglia",
 ]);
+const REGION_MARKER_SHAPES = Object.freeze({
+  prefrontal: {
+    scale: [0.72, 0.38, 0.28],
+    rotation: [-0.12, 0, 0],
+  },
+  associationCortex: {
+    scale: [0.44, 0.62, 0.34],
+    rotation: [0.28, -0.38, -0.32],
+  },
+  temporalCortex: {
+    scale: [0.52, 0.3, 0.48],
+    rotation: [0.08, 0.32, -0.16],
+  },
+  parietalCortex: {
+    scale: [0.46, 0.44, 0.58],
+    rotation: [-0.25, 0.18, 0.24],
+  },
+  motorCortex: {
+    scale: [0.3, 0.64, 0.32],
+    rotation: [0.42, 0.06, -0.42],
+  },
+  cerebellum: {
+    scale: [0.54, 0.3, 0.38],
+    rotation: [-0.14, 0.2, 0.04],
+  },
+  basalGanglia: {
+    scale: [0.3, 0.22, 0.28],
+    rotation: [0.1, 0.35, 0],
+  },
+  amygdala: {
+    scale: [0.24, 0.18, 0.3],
+    rotation: [0.2, 0.22, -0.08],
+  },
+  insula: {
+    scale: [0.38, 0.5, 0.24],
+    rotation: [0.12, 0.54, -0.18],
+  },
+  entorhinal: {
+    scale: [0.34, 0.2, 0.26],
+    rotation: [0.18, 0.18, 0.12],
+  },
+});
 const SEARCH_DEBOUNCE_MS = 300;
 const SEMANTIC_SCORE_THRESHOLD = 0.25;
 const RELATED_MEMORY_LIMIT = 5;
@@ -1912,6 +1954,11 @@ function createRegionMarker(region, definition) {
     return createHippocampusMarker(definition);
   }
 
+  const shape = REGION_MARKER_SHAPES[region];
+  if (shape) {
+    return createAnatomicalRegionMarker(region, definition, shape);
+  }
+
   const color = new THREE.Color(definition.color);
   const isDeepRegion = DEEP_BRAIN_REGIONS.has(region);
   const coreMaterial = new THREE.MeshBasicMaterial({
@@ -1969,6 +2016,89 @@ function createRegionMarker(region, definition) {
     hitTargets: [core],
   };
   marker.add(glow, ring, core);
+  return marker;
+}
+
+function createAnatomicalRegionMarker(region, definition, shape) {
+  const color = new THREE.Color(definition.color);
+  const coreMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const glowMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.BackSide,
+  });
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0,
+    blending: THREE.NormalBlending,
+    depthTest: false,
+    depthWrite: false,
+    wireframe: true,
+  });
+  const hitMaterial = new THREE.MeshBasicMaterial({
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  const marker = new THREE.Group();
+  const geometry = new THREE.SphereGeometry(1, 48, 24);
+  const glowGeometry = geometry.clone();
+  const ringGeometry = geometry.clone();
+  const hitGeometry = geometry.clone();
+
+  const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+  const shell = new THREE.Mesh(ringGeometry, ringMaterial);
+  const core = new THREE.Mesh(geometry, coreMaterial);
+  const hitTarget = new THREE.Mesh(hitGeometry, hitMaterial);
+
+  [glow, shell, core, hitTarget].forEach((mesh) => {
+    mesh.scale.set(...shape.scale);
+    mesh.rotation.set(...shape.rotation);
+  });
+  glow.scale.multiplyScalar(1.24);
+  shell.scale.multiplyScalar(1.04);
+  hitTarget.scale.multiplyScalar(1.12);
+
+  core.userData.region = region;
+  core.userData.isRegionMarker = true;
+  hitTarget.userData.region = region;
+  hitTarget.userData.isRegionMarker = true;
+  core.renderOrder = 6;
+  shell.renderOrder = 5;
+  glow.renderOrder = 4;
+
+  marker.name = `region-marker:${region}`;
+  marker.visible = false;
+  marker.scale.setScalar(definition.markerScale);
+  marker.userData = {
+    region,
+    isDeepRegion: DEEP_BRAIN_REGIONS.has(region),
+    isAnatomicalShape: true,
+    markerScale: definition.markerScale,
+    weight: 0,
+    coreMaterial,
+    glowMaterial,
+    ringMaterial,
+    opacityScale: {
+      core: 0.86,
+      glow: 0.3,
+      ring: 0.42,
+    },
+    hitTargets: [hitTarget],
+  };
+  marker.add(glow, shell, core, hitTarget);
   return marker;
 }
 

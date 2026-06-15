@@ -215,6 +215,18 @@ function initSchema() {
 
   mergeDuplicateEntities();
   backfillCanonicalEntityAliases();
+
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+      memory_id UNINDEXED,
+      title,
+      summary,
+      raw_text,
+      tags,
+      tokenize='porter unicode61'
+    );
+  `);
+  syncMemoriesToFts();
 }
 
 // --- Memory CRUD ---
@@ -261,6 +273,7 @@ export function createMemory(
     now,
     now,
   );
+  syncFtsForMemory(id);
   return getMemory(id);
 }
 
@@ -409,12 +422,83 @@ export function searchMemories(query, { limit = 20 } = {}) {
     .map(deserializeMemory);
 }
 
+// --- FTS5 / BM25 ---
+
+export function syncMemoriesToFts() {
+  const database = getDb();
+  database.exec("DELETE FROM memories_fts");
+  database.prepare(`
+    INSERT INTO memories_fts (memory_id, title, summary, raw_text, tags)
+    SELECT id, title, summary, raw_text, tags FROM memories
+  `).run();
+  database.exec("INSERT INTO memories_fts(memories_fts) VALUES('optimize')");
+}
+
+export function indexMemoryFts(id) {
+  const database = getDb();
+  const memory = database.prepare("SELECT * FROM memories WHERE id = ?").get(id);
+  if (!memory) return;
+  database.prepare("DELETE FROM memories_fts WHERE memory_id = ?").run(id);
+  database.exec("INSERT INTO memories_fts(memories_fts) VALUES('optimize')");
+  database.prepare(`
+    INSERT INTO memories_fts (memory_id, title, summary, raw_text, tags)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(id, memory.title || "", memory.summary || "", memory.raw_text || "", memory.tags || "[]");
+}
+
+export function removeMemoryFts(id) {
+  const database = getDb();
+  database.prepare("DELETE FROM memories_fts WHERE memory_id = ?").run(id);
+  database.exec("INSERT INTO memories_fts(memories_fts) VALUES('optimize')");
+}
+
+export function searchMemoriesFts(query, { limit = 20 } = {}) {
+  const database = getDb();
+  const ftsQuery = buildFtsQuery(query);
+  if (!ftsQuery) return [];
+  try {
+    const rows = database.prepare(`
+      SELECT memory_id, rank
+      FROM memories_fts
+      WHERE memories_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
+    `).all(ftsQuery, limit);
+    return rows.map((row) => ({ id: row.memory_id, score: row.rank }));
+  } catch {
+    return [];
+  }
+}
+
+function buildFtsQuery(query) {
+  const terms = String(query).trim().split(/\s+/).filter(Boolean);
+  if (!terms.length) return "";
+  return terms.map((t) => `"${t.replace(/"/g, '""')}"`).join(" OR ");
+}
+
+function syncFtsForMemory(id) {
+  try {
+    indexMemoryFts(id);
+  } catch {
+    // FTS sync is best-effort; don't break the main operation
+  }
+}
+
+function removeFtsForMemory(id) {
+  try {
+    removeMemoryFts(id);
+  } catch {
+    // FTS sync is best-effort
+  }
+}
+
 export function updateMemorySummary(id, summary) {
   const db = getDb();
   const updatedAt = new Date().toISOString();
   db.prepare(`
     UPDATE memories SET summary = ?, updated_at = ? WHERE id = ?
   `).run(summary, updatedAt, id);
+  syncFtsForMemory(id);
 }
 
 // --- Memory Comparisons ---
@@ -1096,6 +1180,7 @@ export function updateMemoryGraph({
 
     saveExtraction(memoryId, extraction, model, schemaVersion);
     persistDerivedMemoryGraph(memoryId, extraction);
+    syncFtsForMemory(memoryId);
 
     return {
       memory: getMemory(memoryId),
@@ -1706,11 +1791,14 @@ function mergeEntityIntoTarget(
 export function deleteAllMemories() {
   const db = getDb();
   db.exec("DELETE FROM memories");
+  db.exec("DELETE FROM memories_fts");
+  db.exec("INSERT INTO memories_fts(memories_fts) VALUES('optimize')");
 }
 
 export function deleteMemory(id) {
   const db = getDb();
   db.prepare("DELETE FROM memories WHERE id = ?").run(id);
+  removeFtsForMemory(id);
 }
 
 // --- Graph Data ---

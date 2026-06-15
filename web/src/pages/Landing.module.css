@@ -1,7 +1,7 @@
 /* ============================================================================
    Landing — "phosphor lab instrument / archival neuro-terminal"
    Composed with hairline rules, negative space, asymmetry, marginalia.
-   No cards, no status bars, no eyebrow kickers. Green-on-black only.
+   No cards, no status bars, no eyebrow kickers. Blue-on-black only.
    ========================================================================== */
 
 .page {
@@ -26,7 +26,7 @@
   gap: 24px;
   height: 58px;
   padding: 0 var(--pad);
-  background: rgba(6, 8, 7, 0.78);
+  background: rgba(17, 19, 24, 0.78);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
@@ -44,7 +44,7 @@
   width: 24px;
   height: 24px;
   color: var(--green);
-  filter: drop-shadow(0 0 4px rgba(78, 240, 143, 0.4));
+  filter: drop-shadow(0 0 4px rgba(56, 130, 246, 0.4));
 }
 
 .topnav {
@@ -75,7 +75,7 @@
 
 .hero {
   position: relative;
-  padding: clamp(64px, 11vw, 150px) var(--pad) clamp(48px, 8vw, 96px);
+  padding: clamp(36px, 6vw, 72px) var(--pad) clamp(28px, 5vw, 56px);
   border-bottom: 1px solid var(--line);
   overflow: hidden;
 }
@@ -108,7 +108,7 @@
   font-size: clamp(46px, 9vw, 118px);
   line-height: 0.94;
   color: var(--green-bright);
-  text-shadow: 0 0 30px rgba(78, 240, 143, 0.14);
+  text-shadow: 0 0 30px rgba(56, 130, 246, 0.14);
   margin: 0;
 }
 .heroTitle em {
@@ -118,7 +118,7 @@
 
 .heroSub {
   max-width: 60ch;
-  margin: 28px 0 0;
+  margin: 18px 0 0;
   font-family: var(--font-mono);
   font-size: clamp(13px, 1.4vw, 15px);
   line-height: 1.7;
@@ -129,7 +129,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  margin-top: 34px;
+  margin-top: 22px;
 }
 
 /* oscilloscope phosphor trace */
@@ -137,14 +137,14 @@
   display: block;
   width: 100%;
   height: 64px;
-  margin: 48px 0 8px;
+  margin: 24px 0 8px;
   opacity: 0.85;
 }
 .scopeLine {
   fill: none;
   stroke: var(--green);
   stroke-width: 1.4;
-  filter: drop-shadow(0 0 4px rgba(78, 240, 143, 0.55));
+  filter: drop-shadow(0 0 4px rgba(56, 130, 246, 0.55));
   stroke-dasharray: 1600;
   stroke-dashoffset: 1600;
   animation: scopeDraw 2.6s ease-out 0.5s forwards;
@@ -159,7 +159,7 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0;
-  margin: 28px 0 0;
+  margin: 18px 0 0;
   border-top: 1px solid var(--line);
 }
 .metric {
@@ -195,7 +195,7 @@
 .marginNote {
   position: absolute;
   right: var(--pad);
-  bottom: clamp(48px, 8vw, 96px);
+  bottom: clamp(24px, 4vw, 48px);
   max-width: 150px;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -213,12 +213,12 @@
 /* ----------------------------------------------------------------- sections */
 
 .section {
-  padding: clamp(56px, 9vw, 112px) var(--pad);
+  padding: clamp(32px, 5vw, 64px) var(--pad);
 }
 
 .sectionHead {
   max-width: 70ch;
-  margin-bottom: clamp(36px, 5vw, 60px);
+  margin-bottom: clamp(20px, 3vw, 36px);
 }
 .sectionHead .rule-label {
   margin-bottom: 22px;
@@ -460,143 +460,147 @@
 
 /* ------------------------------------------------------------- architecture */
 
-.arch {
-  display: flex;
-  flex-direction: column;
-  gap: clamp(20px, 3vw, 36px);
+.archChart {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
-.archTier {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.archSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 640px;
 }
-.archTierLabel {
+
+/* ---- shared SVG text styles ---- */
+.archLabel {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--green);
-}
-.archFlow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 14px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text);
-}
-.archFlow i {
-  font-style: normal;
-  color: var(--green);
+  fill: var(--green);
 }
 
-.archSplit {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+/* ---- capture pipeline nodes ---- */
+.archNode {
+  fill: var(--bg-2);
+  stroke: var(--line-strong);
+  stroke-width: 1;
 }
-.archSplit::before,
-.archSplit::after {
-  content: "";
-  height: 1px;
-  flex: 1;
-  background: var(--line);
+.archNodeHighlight {
+  fill: rgba(56, 130, 246, 0.08);
+  stroke: var(--green);
+  stroke-width: 1.5;
 }
-.archSplitLabel {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.archStores {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  border-block: 1px solid var(--line);
-}
-.archStore {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 22px 28px 22px 0;
-  border-right: 1px solid var(--line-soft);
-}
-.archStore:last-child {
-  border-right: 0;
-  padding-left: 28px;
-}
-.archStore strong {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  font-size: 28px;
-  color: var(--green-bright);
-}
-.archStore strong code {
+.archNodeTitle {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--green);
+  fill: var(--text);
 }
-@media (max-width: 700px) {
-  .archStores {
-    grid-template-columns: 1fr;
-  }
-  .archStore {
-    padding: 18px 0;
-    border-right: 0;
-    border-bottom: 1px solid var(--line-soft);
-  }
-  .archStore:last-child {
-    padding-left: 0;
-    border-bottom: 0;
-  }
+.archNodeTitleHl {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--green-bright);
+  font-weight: 600;
+}
+.archNodeSub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--muted);
+}
+.archNodeSubHl {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--green);
 }
 
-.archRecall {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0;
+/* ---- arrows between nodes ---- */
+.archArrow {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
 }
-.archRecall li {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 4px 26px 4px 0;
-  border-right: 1px solid var(--line-soft);
+.archArrowHead {
+  fill: var(--line-strong);
 }
-.archRecall li:last-child {
-  border-right: 0;
+
+/* ---- vertical / branching pipes ---- */
+.archPipe {
+  stroke: rgba(56, 130, 246, 0.5);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 4;
+  animation: pipeFlow 1.8s linear infinite;
 }
-.archRecall strong {
+.archPipeHead {
+  fill: rgba(56, 130, 246, 0.5);
+}
+
+@keyframes pipeFlow {
+  from { stroke-dashoffset: 20; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* ---- store nodes ---- */
+.archStoreNode {
+  fill: var(--bg-2);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.archStoreName {
   font-family: var(--font-serif);
-  font-weight: 400;
-  font-size: 22px;
-  color: var(--green-bright);
+  font-size: 20px;
+  fill: var(--green-bright);
 }
-.archRecall code {
+.archStoreCode {
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--green);
+  fill: var(--green);
 }
-@media (max-width: 760px) {
-  .archRecall {
-    grid-template-columns: 1fr;
-  }
-  .archRecall li {
-    padding: 16px 0;
-    border-right: 0;
-    border-bottom: 1px solid var(--line-soft);
-  }
-  .archRecall li:last-child {
-    border-bottom: 0;
-  }
+.archStoreRole {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  fill: var(--muted);
+  letter-spacing: 0.03em;
+}
+.archStoreDetail {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--faint);
+}
+
+/* ---- recall nodes ---- */
+.archRecallNode {
+  fill: var(--bg-2);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.archRecallName {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  fill: var(--green-bright);
+}
+.archRecallDesc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--muted);
+}
+.archRecallTag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--green);
+}
+
+/* ---- user node ---- */
+.archUserNode {
+  fill: rgba(56, 130, 246, 0.1);
+  stroke: var(--green);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 2;
+}
+.archUserLabel {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--green-bright);
 }
 
 .archDetail {
@@ -606,6 +610,7 @@
   color: var(--muted);
 }
 
+/* ---- note below chart ---- */
 .archNote {
   margin: 8px 0 0;
   font-family: var(--font-mono);
@@ -714,7 +719,7 @@
   transition: background 0.15s ease, padding-left 0.15s ease;
 }
 .mcpTools li:hover {
-  background: rgba(78, 240, 143, 0.05);
+  background: rgba(56, 130, 246, 0.05);
   padding-left: 8px;
 }
 .mcpTools code {
@@ -867,7 +872,7 @@
 
 .ctaBand {
   position: relative;
-  padding: clamp(72px, 12vw, 150px) var(--pad);
+  padding: clamp(40px, 7vw, 80px) var(--pad);
   border-block: 1px solid var(--line);
   overflow: hidden;
   text-align: center;
@@ -890,7 +895,7 @@
   font-size: clamp(30px, 5.5vw, 66px);
   line-height: 1.04;
   color: var(--green-bright);
-  text-shadow: 0 0 30px rgba(78, 240, 143, 0.16);
+  text-shadow: 0 0 30px rgba(56, 130, 246, 0.16);
 }
 .ctaBand h2 em {
   font-style: italic;
@@ -976,5 +981,9 @@
   }
   .labOutputLive .meterFill {
     transition: none;
+  }
+  .archPipe {
+    animation: none;
+    stroke-dashoffset: 0;
   }
 }

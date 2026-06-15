@@ -18,14 +18,14 @@ import type { GraphData, GraphEdge, GraphNode } from "../../lib/types";
 
 /* Phosphor palette (mirrors web/src/theme/theme.css tokens). */
 const C = {
-  bg: "#060807",
-  green: "#4ef08f",
-  greenBright: "#9bffc7",
-  greenMid: "#2fbf74",
-  greenDim: "#1f6e46",
-  muted: "#5f8270",
-  edgeRel: "rgba(78, 240, 143, 0.22)",
-  edgeMem: "rgba(78, 240, 143, 0.12)",
+  bg: "#111318",
+  green: "#3882F6",
+  greenBright: "#6ba3ff",
+  greenMid: "#2563eb",
+  greenDim: "#1e40af",
+  muted: "#6b7280",
+  edgeRel: "rgba(56, 130, 246, 0.22)",
+  edgeMem: "rgba(56, 130, 246, 0.12)",
 } as const;
 
 /* Memory/extraction subtype on a node, e.g. [{type, weight}]. */

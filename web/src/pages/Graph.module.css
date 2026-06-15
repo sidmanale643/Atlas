@@ -1,6 +1,6 @@
 /* ===========================================================================
    Graph page — phosphor lab instrument. Sidebar (divider-separated regions,
-   NOT cards) + tall graph canvas. Monochrome green on near-black.
+   NOT cards) + tall graph canvas. Monochrome blue on near-black.
    ========================================================================= */
 
 .page {
@@ -101,7 +101,7 @@
 .chipOn {
   color: var(--green-bright);
   border-color: var(--green);
-  background: rgba(78, 240, 143, 0.08);
+  background: rgba(56, 130, 246, 0.08);
   box-shadow: var(--glow-soft);
 }
 
@@ -132,7 +132,7 @@
 .swatchMem {
   border-radius: 50%;
   background: var(--green-bright);
-  box-shadow: 0 0 6px rgba(155, 255, 199, 0.5);
+  box-shadow: 0 0 6px rgba(107, 163, 255, 0.5);
 }
 .swatchEntity {
   background: transparent;
@@ -196,7 +196,7 @@
   background:
     radial-gradient(
       120% 90% at 50% 0%,
-      rgba(47, 191, 116, 0.05),
+      rgba(56, 130, 246, 0.05),
       transparent 60%
     ),
     var(--bg);
@@ -242,12 +242,12 @@
   opacity: 0.05;
 }
 
-/* hover / selected: bright green with glow */
+/* hover / selected: bright blue with glow */
 .svg :global(.ng-node.highlighted .ng-shape) {
   stroke: var(--green-bright);
   stroke-width: 2.2px;
   fill-opacity: 0.5;
-  filter: drop-shadow(0 0 6px rgba(155, 255, 199, 0.65));
+  filter: drop-shadow(0 0 6px rgba(107, 163, 255, 0.65));
 }
 .svg :global(.ng-node.highlighted .ng-node-label) {
   fill: var(--green-bright);
@@ -270,7 +270,7 @@
   flex-direction: column;
   gap: 3px;
   padding: 8px 11px;
-  background: rgba(6, 8, 7, 0.92);
+  background: rgba(17, 19, 24, 0.92);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   box-shadow: var(--glow-soft);
@@ -306,7 +306,7 @@
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--muted);
-  background: rgba(6, 8, 7, 0.6);
+  background: rgba(17, 19, 24, 0.6);
 }
 
 /* ------ detail panel (inline region, not a fixed status bar) ------ */

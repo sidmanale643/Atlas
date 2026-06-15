@@ -1,7 +1,7 @@
 /* ============================================================================
    NEUROGRAM — "phosphor lab instrument" design system
    Two-tier type: Departure Mono (instrument/data) + Instrument Serif (journal).
-   Strictly phosphor-green on near-black. No cards, no status bars, no eyebrows.
+   Dual color: #3882F6 blue on black. No cards, no status bars, no eyebrows.
    ========================================================================== */
 
 @font-face {
@@ -16,30 +16,30 @@
 
 :root {
   /* surfaces */
-  --bg: #060807;
-  --bg-2: #0a0d0b;
-  --inset: rgba(18, 30, 23, 0.35);
-  --inset-strong: rgba(24, 40, 30, 0.55);
+  --bg: #111318;
+  --bg-2: #171a20;
+  --inset: rgba(17, 19, 24, 0.35);
+  --inset-strong: rgba(17, 19, 24, 0.55);
 
-  /* phosphor greens — the only chrome hue */
-  --green: #4ef08f;
-  --green-bright: #9bffc7;
-  --green-mid: #2fbf74;
-  --green-dim: #1f6e46;
+  /* blue — the only chrome hue */
+  --green: #3882F6;
+  --green-bright: #6ba3ff;
+  --green-mid: #2563eb;
+  --green-dim: #1e40af;
 
   /* text */
-  --text: #c4e8d4;
-  --muted: #5f8270;
-  --faint: #3c5648;
+  --text: #d1d5db;
+  --muted: #6b7280;
+  --faint: #4b5563;
 
   /* lines */
-  --line: rgba(78, 240, 143, 0.14);
-  --line-soft: rgba(78, 240, 143, 0.08);
-  --line-strong: rgba(78, 240, 143, 0.34);
+  --line: rgba(56, 130, 246, 0.14);
+  --line-soft: rgba(56, 130, 246, 0.08);
+  --line-strong: rgba(56, 130, 246, 0.34);
 
   /* glow */
-  --glow: 0 0 0.5em rgba(78, 240, 143, 0.45);
-  --glow-soft: 0 0 18px rgba(78, 240, 143, 0.12);
+  --glow: 0 0 0.5em rgba(56, 130, 246, 0.45);
+  --glow-soft: 0 0 18px rgba(56, 130, 246, 0.12);
 
   --font-mono: "Departure Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --font-serif: "Instrument Serif", "Times New Roman", Georgia, serif;
@@ -69,7 +69,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Atmosphere: phosphor vignette + faint horizontal scanlines (CRT, not gloss) */
+/* Atmosphere: subtle blue vignette */
 body::before {
   content: "";
   position: fixed;
@@ -77,8 +77,8 @@ body::before {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(120% 80% at 50% -10%, rgba(47, 191, 116, 0.08), transparent 60%),
-    radial-gradient(90% 60% at 100% 110%, rgba(31, 110, 70, 0.07), transparent 55%);
+    radial-gradient(120% 80% at 50% -10%, rgba(56, 130, 246, 0.08), transparent 60%),
+    radial-gradient(90% 60% at 100% 110%, rgba(37, 99, 235, 0.07), transparent 55%);
 }
 
 body::after {
@@ -105,7 +105,7 @@ body::after {
 }
 
 ::selection {
-  background: rgba(78, 240, 143, 0.28);
+  background: rgba(56, 130, 246, 0.28);
   color: var(--green-bright);
 }
 
@@ -194,7 +194,7 @@ h1, h2, h3, h4 {
   transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 .nrg-btn:hover:not(:disabled) {
-  background: rgba(78, 240, 143, 0.1);
+  background: rgba(56, 130, 246, 0.1);
   border-color: var(--green);
   color: var(--green-bright);
   box-shadow: var(--glow-soft);
@@ -203,13 +203,13 @@ h1, h2, h3, h4 {
 
 .nrg-btn--solid {
   background: var(--green);
-  color: #04130b;
+  color: #000000;
   border-color: var(--green);
   font-weight: 400;
 }
 .nrg-btn--solid:hover:not(:disabled) {
   background: var(--green-bright);
-  color: #04130b;
+  color: #000000;
   box-shadow: var(--glow);
 }
 

@@ -22,6 +22,7 @@ import createLogger from "./logger.js";
 import {
   deleteAllMemoryVectors,
   deleteMemoryVector,
+  hybridSearchMemories,
   indexMemoryVector,
   searchMemoryVectors,
 } from "./vector-store.js";
@@ -50,6 +51,7 @@ import {
   getGraphData,
   saveMemoryComparison,
   resolveEntityResolutionSuggestion,
+  searchMemoriesFts,
   deleteAllMemories,
   deleteMemory,
 } from "./db.js";
@@ -223,11 +225,20 @@ export function createNeurogramApp(overrides = {}) {
 
     const limit = clampInteger(req.query.limit, 10, 1, 100);
     const scoreThreshold = parseOptionalNumber(req.query.scoreThreshold);
+    const strategy = String(req.query.strategy || "hybrid");
+    const validStrategies = ["hybrid", "vector", "bm25"];
+    if (!validStrategies.includes(strategy)) {
+      return res.status(400).json({
+        error: `strategy must be one of: ${validStrategies.join(", ")}`,
+      });
+    }
 
     try {
-      const hits = await dependencies.searchMemoryVectors(query, {
+      const hits = await hybridSearchMemories(query, {
         limit,
         scoreThreshold,
+        strategy,
+        searchMemoriesFts,
       });
       const hitIds = hits.map(({ id }) => id);
       const memoriesById = new Map(
@@ -236,14 +247,14 @@ export function createNeurogramApp(overrides = {}) {
       const memories = hits.flatMap(({ id, score }) => {
         const memory = memoriesById.get(id);
         return memory
-          ? [{ ...serializeMemory(memory, dependencies), similarity: score }]
+          ? [{ ...serializeMemory(memory, dependencies), rrfScore: score }]
           : [];
       });
-      res.json({ query, memories });
+      res.json({ query, strategy, memories });
     } catch (error) {
-      log.error("vector search failed", { error: error.message });
+      log.error("search failed", { error: error.message });
       res.status(503).json({
-        error: "Vector search unavailable",
+        error: "Search unavailable",
         detail: error.message,
       });
     }
@@ -280,6 +291,7 @@ export function createNeurogramApp(overrides = {}) {
         getMemory: dependencies.getMemory,
         getStructuralMemoryLinks: dependencies.getStructuralMemoryLinks,
         searchMemoryVectors: dependencies.searchMemoryVectors,
+        searchMemoriesFts,
         serializeMemory: (memory) =>
           serializeMemory(memory, dependencies, {
             includeRelationships: true,

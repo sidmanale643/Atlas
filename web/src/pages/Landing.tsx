@@ -29,38 +29,7 @@ const EXTRACT_REGIONS: ReadonlyArray<{ region: string; weight: number }> = [
   { region: "Prefrontal cortex", weight: 0.16 },
 ];
 
-const ARCH_STORES: ReadonlyArray<{ name: string; code: string; role: string; detail: string }> = [
-  {
-    name: "SQLite",
-    code: "engram.db",
-    role: "Source of truth · the graph",
-    detail: "memories · extractions · entities · relationships · region activations",
-  },
-  {
-    name: "Qdrant",
-    code: "neurogram_memories",
-    role: "Semantic index",
-    detail: "384-dimension vectors · cosine distance",
-  },
-];
 
-const ARCH_RECALL: ReadonlyArray<{ name: string; detail: string; tag: string }> = [
-  {
-    name: "Semantic recall",
-    detail: "Embed the query, take the cosine-nearest vectors from Qdrant.",
-    tag: "GET /api/memories/search",
-  },
-  {
-    name: "Structural links",
-    detail: "Memories sharing entities or triples — fire together, wire together.",
-    tag: "GET /api/memories/:id/links",
-  },
-  {
-    name: "Entity & catalog",
-    detail: "Full-text search across names, aliases, summaries and raw text.",
-    tag: "GET /api/catalog",
-  },
-];
 
 const MCP_TOOLS: ReadonlyArray<{ name: string; note: string }> = [
   { name: "add_memory", note: "write a moment" },
@@ -333,57 +302,124 @@ export default function Landing() {
             </p>
           </div>
 
-          <div className={styles.arch}>
-            <div className={styles.archTier}>
-              <span className={styles.archTierLabel}>capture</span>
-              <div className={styles.archFlow}>
-                <span>Natural language</span>
-                <i aria-hidden="true">→</i>
-                <span>Schema-locked extraction</span>
-                <i aria-hidden="true">→</i>
-                <span>Cortical map · 11 ROIs</span>
-                <i aria-hidden="true">→</i>
-                <span>Embedding · 384-d</span>
-              </div>
-            </div>
+          <div className={styles.archChart}>
+            <svg
+              viewBox="0 0 960 520"
+              className={styles.archSvg}
+              aria-label="Architecture diagram: capture flow splits to two stores, three recall paths converge back"
+              role="img"
+            >
+              {/* ---- row 1: capture pipeline ---- */}
+              <text x="0" y="18" className={styles.archLabel}>CAPTURE</text>
 
-            <div className={styles.archSplit} aria-hidden="true">
-              <span className={styles.archSplitLabel}>one write · two stores</span>
-            </div>
+              <rect x="0" y="30" width="150" height="48" rx="4" className={styles.archNode} />
+              <text x="75" y="50" textAnchor="middle" className={styles.archNodeTitle}>Natural</text>
+              <text x="75" y="66" textAnchor="middle" className={styles.archNodeTitle}>language</text>
 
-            <div className={styles.archStores}>
-              {ARCH_STORES.map((s) => (
-                <div className={styles.archStore} key={s.name}>
-                  <span className="label">{s.role}</span>
-                  <strong>
-                    {s.name} <code>{s.code}</code>
-                  </strong>
-                  <span className={styles.archDetail}>{s.detail}</span>
-                </div>
-              ))}
-            </div>
+              <line x1="150" y1="54" x2="190" y2="54" className={styles.archArrow} />
+              <polygon points="186,49 196,54 186,59" className={styles.archArrowHead} />
 
-            <div className={styles.archSplit} aria-hidden="true">
-              <span className={styles.archSplitLabel}>three ways back</span>
-            </div>
+              <rect x="196" y="30" width="150" height="48" rx="4" className={styles.archNode} />
+              <text x="271" y="50" textAnchor="middle" className={styles.archNodeTitle}>Schema-locked</text>
+              <text x="271" y="66" textAnchor="middle" className={styles.archNodeTitle}>extraction</text>
 
-            <ul className={styles.archRecall}>
-              {ARCH_RECALL.map((r) => (
-                <li key={r.name}>
-                  <strong>{r.name}</strong>
-                  <span className={styles.archDetail}>{r.detail}</span>
-                  <code>{r.tag}</code>
-                </li>
-              ))}
-            </ul>
+              <line x1="346" y1="54" x2="386" y2="54" className={styles.archArrow} />
+              <polygon points="382,49 392,54 382,59" className={styles.archArrowHead} />
 
-            <p className={styles.archNote}>
-              Related-memories fuses structural + semantic signal —{" "}
-              <code>1 − ∏(1 − signal)</code>. Surfaces:{" "}
-              <a href="/atlas">Atlas</a>, <a href="/memories">Memories</a>,{" "}
-              <a href="/graph">Graph</a>.
-            </p>
+              <rect x="392" y="30" width="150" height="48" rx="4" className={styles.archNode} />
+              <text x="467" y="50" textAnchor="middle" className={styles.archNodeTitle}>Cortical map</text>
+              <text x="467" y="66" textAnchor="middle" className={styles.archNodeSub}>11 ROIs</text>
+
+              <line x1="542" y1="54" x2="582" y2="54" className={styles.archArrow} />
+              <polygon points="578,49 588,54 578,59" className={styles.archArrowHead} />
+
+              <rect x="588" y="30" width="150" height="48" rx="4" className={styles.archNodeHighlight} />
+              <text x="663" y="50" textAnchor="middle" className={styles.archNodeTitleHl}>Embedding</text>
+              <text x="663" y="66" textAnchor="middle" className={styles.archNodeSubHl}>384-d</text>
+
+              {/* ---- split: branching lines from embedding down to stores ---- */}
+              <line x1="663" y1="78" x2="663" y2="108" className={styles.archPipe} />
+              <line x1="663" y1="108" x2="310" y2="108" className={styles.archPipe} />
+              <line x1="663" y1="108" x2="820" y2="108" className={styles.archPipe} />
+              {/* left branch */}
+              <line x1="310" y1="108" x2="310" y2="130" className={styles.archPipe} />
+              <polygon points="305,126 310,136 315,126" className={styles.archPipeHead} />
+              {/* right branch */}
+              <line x1="820" y1="108" x2="820" y2="130" className={styles.archPipe} />
+              <polygon points="815,126 820,136 825,126" className={styles.archPipeHead} />
+
+              {/* ---- row 2: two stores ---- */}
+              <text x="0" y="155" className={styles.archLabel}>ONE WRITE · TWO STORES</text>
+
+              {/* SQLite */}
+              <rect x="155" y="168" width="310" height="80" rx="4" className={styles.archStoreNode} />
+              <text x="175" y="192" className={styles.archStoreName}>SQLite</text>
+              <text x="280" y="192" className={styles.archStoreCode}>engram.db</text>
+              <text x="175" y="214" className={styles.archStoreRole}>Source of truth · the graph</text>
+              <text x="175" y="234" className={styles.archStoreDetail}>memories · extractions · entities · relationships · region activations</text>
+
+              {/* Qdrant */}
+              <rect x="555" y="168" width="310" height="80" rx="4" className={styles.archStoreNode} />
+              <text x="575" y="192" className={styles.archStoreName}>Qdrant</text>
+              <text x="680" y="192" className={styles.archStoreCode}>neurogram_memories</text>
+              <text x="575" y="214" className={styles.archStoreRole}>Semantic index</text>
+              <text x="575" y="234" className={styles.archStoreDetail}>384-dimension vectors · cosine distance</text>
+
+              {/* ---- merge lines from stores to recall row ---- */}
+              <line x1="310" y1="248" x2="310" y2="278" className={styles.archPipe} />
+              <line x1="820" y1="248" x2="820" y2="278" className={styles.archPipe} />
+              <line x1="310" y1="278" x2="820" y2="278" className={styles.archPipe} />
+              {/* three branches down */}
+              <line x1="260" y1="278" x2="260" y2="300" className={styles.archPipe} />
+              <polygon points="255,296 260,306 265,296" className={styles.archPipeHead} />
+              <line x1="540" y1="278" x2="540" y2="300" className={styles.archPipe} />
+              <polygon points="535,296 540,306 545,296" className={styles.archPipeHead} />
+              <line x1="820" y1="278" x2="820" y2="300" className={styles.archPipe} />
+              <polygon points="815,296 820,306 825,296" className={styles.archPipeHead} />
+
+              {/* ---- row 3: three recall paths ---- */}
+              <text x="0" y="325" className={styles.archLabel}>THREE WAYS BACK</text>
+
+              {/* Semantic recall */}
+              <rect x="80" y="340" width="360" height="90" rx="4" className={styles.archRecallNode} />
+              <text x="100" y="364" className={styles.archRecallName}>Semantic recall</text>
+              <text x="100" y="386" className={styles.archRecallDesc}>Embed the query, take the cosine-nearest</text>
+              <text x="100" y="402" className={styles.archRecallDesc}>vectors from Qdrant.</text>
+              <text x="100" y="420" className={styles.archRecallTag}>GET /api/memories/search</text>
+
+              {/* Structural links */}
+              <rect x="460" y="340" width="160" height="90" rx="4" className={styles.archRecallNode} />
+              <text x="480" y="364" className={styles.archRecallName}>Structural</text>
+              <text x="480" y="380" className={styles.archRecallName}>links</text>
+              <text x="480" y="402" className={styles.archRecallDesc}>Memories sharing</text>
+              <text x="480" y="418" className={styles.archRecallDesc}>entities or triples</text>
+
+              {/* Entity & catalog */}
+              <rect x="640" y="340" width="230" height="90" rx="4" className={styles.archRecallNode} />
+              <text x="660" y="364" className={styles.archRecallName}>Entity & catalog</text>
+              <text x="660" y="386" className={styles.archRecallDesc}>Full-text search across names,</text>
+              <text x="660" y="402" className={styles.archRecallDesc}>aliases, summaries and raw text.</text>
+              <text x="660" y="420" className={styles.archRecallTag}>GET /api/catalog</text>
+
+              {/* ---- recall-to-user arrows converging at bottom ---- */}
+              <line x1="260" y1="430" x2="260" y2="460" className={styles.archPipe} />
+              <line x1="540" y1="430" x2="540" y2="460" className={styles.archPipe} />
+              <line x1="820" y1="430" x2="820" y2="460" className={styles.archPipe} />
+              <line x1="260" y1="460" x2="820" y2="460" className={styles.archPipe} />
+              <line x1="540" y1="460" x2="540" y2="480" className={styles.archPipe} />
+              <polygon points="535,476 540,486 545,476" className={styles.archPipeHead} />
+
+              <rect x="440" y="488" width="200" height="30" rx="4" className={styles.archUserNode} />
+              <text x="540" y="508" textAnchor="middle" className={styles.archUserLabel}>You / MCP Client</text>
+            </svg>
           </div>
+
+          <p className={styles.archNote}>
+            Related-memories fuses structural + semantic signal —{" "}
+            <code>1 − ∏(1 − signal)</code>. Surfaces:{" "}
+            <a href="/atlas">Atlas</a>, <a href="/memories">Memories</a>,{" "}
+            <a href="/graph">Graph</a>.
+          </p>
         </section>
 
         <hr className="nrg-divider" />

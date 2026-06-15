@@ -1,0 +1,246 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-14T00:00:00Z",
+  "title": "Design System: Neurogram",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "oklch(18% 0.015 175)",
+        "tonalRamp": ["oklch(10% 0.01 175)", "oklch(14% 0.012 175)", "oklch(18% 0.015 175)", "oklch(22% 0.018 175)", "oklch(28% 0.02 175)", "oklch(35% 0.022 175)", "oklch(45% 0.02 175)", "oklch(55% 0.015 175)"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(94% 0.008 80)",
+        "tonalRamp": ["oklch(20% 0.005 80)", "oklch(35% 0.006 80)", "oklch(50% 0.007 80)", "oklch(65% 0.008 80)", "oklch(78% 0.008 80)", "oklch(88% 0.008 80)", "oklch(94% 0.008 80)", "oklch(98% 0.004 80)"]
+      },
+      "event": {
+        "role": "primary",
+        "displayName": "Cyan Signal",
+        "canonical": "oklch(88% 0.06 195)",
+        "tonalRamp": ["oklch(25% 0.06 195)", "oklch(35% 0.07 195)", "oklch(48% 0.08 195)", "oklch(58% 0.09 195)", "oklch(68% 0.08 195)", "oklch(78% 0.07 195)", "oklch(88% 0.06 195)", "oklch(95% 0.03 195)"]
+      },
+      "person": {
+        "role": "secondary",
+        "displayName": "Person Blue",
+        "canonical": "oklch(78% 0.08 255)",
+        "tonalRamp": ["oklch(25% 0.06 255)", "oklch(35% 0.07 255)", "oklch(48% 0.08 255)", "oklch(58% 0.09 255)", "oklch(68% 0.08 255)", "oklch(78% 0.08 255)", "oklch(85% 0.06 255)", "oklch(93% 0.03 255)"]
+      },
+      "place": {
+        "role": "secondary",
+        "displayName": "Place Teal",
+        "canonical": "oklch(88% 0.06 168)",
+        "tonalRamp": ["oklch(25% 0.05 168)", "oklch(35% 0.06 168)", "oklch(48% 0.07 168)", "oklch(58% 0.08 168)", "oklch(68% 0.07 168)", "oklch(78% 0.06 168)", "oklch(88% 0.06 168)", "oklch(95% 0.03 168)"]
+      },
+      "object": {
+        "role": "tertiary",
+        "displayName": "Object Gold",
+        "canonical": "oklch(87% 0.08 80)",
+        "tonalRamp": ["oklch(25% 0.06 80)", "oklch(35% 0.07 80)", "oklch(48% 0.08 80)", "oklch(58% 0.09 80)", "oklch(68% 0.08 80)", "oklch(78% 0.08 80)", "oklch(87% 0.08 80)", "oklch(95% 0.04 80)"]
+      },
+      "concept": {
+        "role": "tertiary",
+        "displayName": "Concept Pink",
+        "canonical": "oklch(78% 0.09 330)",
+        "tonalRamp": ["oklch(25% 0.06 330)", "oklch(35% 0.07 330)", "oklch(48% 0.08 330)", "oklch(58% 0.09 330)", "oklch(68% 0.09 330)", "oklch(78% 0.09 330)", "oklch(85% 0.06 330)", "oklch(93% 0.03 330)"]
+      },
+      "organization": {
+        "role": "tertiary",
+        "displayName": "Organization Orange",
+        "canonical": "oklch(82% 0.09 55)",
+        "tonalRamp": ["oklch(25% 0.06 55)", "oklch(35% 0.07 55)", "oklch(48% 0.08 55)", "oklch(58% 0.09 55)", "oklch(68% 0.09 55)", "oklch(78% 0.09 55)", "oklch(82% 0.09 55)", "oklch(93% 0.04 55)"]
+      },
+      "time": {
+        "role": "tertiary",
+        "displayName": "Time Lavender",
+        "canonical": "oklch(74% 0.08 290)",
+        "tonalRamp": ["oklch(25% 0.06 290)", "oklch(35% 0.07 290)", "oklch(48% 0.08 290)", "oklch(58% 0.08 290)", "oklch(68% 0.08 290)", "oklch(74% 0.08 290)", "oklch(82% 0.06 290)", "oklch(92% 0.03 290)"]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "oklch(67% 0.015 170)",
+        "tonalRamp": ["oklch(20% 0.008 170)", "oklch(30% 0.01 170)", "oklch(40% 0.012 170)", "oklch(50% 0.014 170)", "oklch(58% 0.015 170)", "oklch(67% 0.015 170)", "oklch(78% 0.012 170)", "oklch(90% 0.008 170)"]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "canonical": "oklch(22% 0.015 170)",
+        "tonalRamp": ["oklch(12% 0.01 170)", "oklch(16% 0.012 170)", "oklch(20% 0.014 170)", "oklch(24% 0.015 170)", "oklch(30% 0.016 170)", "oklch(38% 0.015 170)", "oklch(48% 0.012 170)", "oklch(60% 0.01 170)"]
+      },
+      "glass": {
+        "role": "neutral",
+        "displayName": "Glass",
+        "canonical": "oklch(14% 0.012 170)",
+        "tonalRamp": ["oklch(10% 0.01 170)", "oklch(12% 0.011 170)", "oklch(14% 0.012 170)", "oklch(16% 0.013 170)", "oklch(19% 0.014 170)", "oklch(23% 0.014 170)", "oklch(28% 0.013 170)", "oklch(34% 0.012 170)"]
+      },
+      "error": {
+        "role": "semantic",
+        "displayName": "Error",
+        "canonical": "oklch(84% 0.06 25)",
+        "tonalRamp": ["oklch(25% 0.05 25)", "oklch(35% 0.06 25)", "oklch(48% 0.07 25)", "oklch(58% 0.07 25)", "oklch(68% 0.06 25)", "oklch(78% 0.06 25)", "oklch(84% 0.06 25)", "oklch(93% 0.03 25)"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Hero headlines only. Ultra-light Newsreader at large scale."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section headings across atlas, catalog, and comparison views."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Intro copy, memory content, prose. Serif for contemplative reading."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Section markers, metadata, eyebrow text, status indicators. Always uppercase mono."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Input text, table data, search fields, sidebar navigation. Functional monospace."
+      }
+    },
+    "shadows": [
+      { "name": "focus-glow", "value": "0 0 0 3px rgba(154, 230, 245, 0.09)", "purpose": "Input and button focus rings. Soft cyan halo for keyboard focus." },
+      { "name": "hover-glow", "value": "0 0 28px rgba(154, 230, 245, 0.22)", "purpose": "CTA button hover. Radiant glow that makes the element feel alive." },
+      { "name": "card-lift", "value": "0 18px 45px rgba(0, 0, 0, 0.4)", "purpose": "Memory hover panels and detail overlays. Deep ambient lift." },
+      { "name": "panel-depth", "value": "0 30px 90px rgba(0, 0, 0, 0.32)", "purpose": "Workspace frame and auth card. Maximum structural depth." },
+      { "name": "entity-glow", "value": "0 0 18px var(--entity-color, rgba(154, 230, 245, 0.3))", "purpose": "Entity dots and chips in the graph. Type-specific radiance." },
+      { "name": "inset-glass", "value": "inset 0 1px 0 rgba(255, 255, 255, 0.04)", "purpose": "Top-edge highlight on glass panels. Subtle depth cue." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Default easing for state transitions. Exponential ease-out." },
+      { "name": "ease-quick", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Fast state changes (hover, focus). 140–180ms." },
+      { "name": "duration-fast", "value": "140ms", "purpose": "Hover state, chip toggle, focus ring." },
+      { "name": "duration-medium", "value": "250ms", "purpose": "Card transitions, panel reveals." },
+      { "name": "duration-slow", "value": "700ms", "purpose": "Scroll reveal, page entrance." },
+      { "name": "duration-choreographed", "value": "600ms", "purpose": "Staggered child reveals. Each child delayed 80ms." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "590px" },
+      { "name": "md", "value": "900px" },
+      { "name": "lg", "value": "1200px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Cyan-tinted pill CTA. Glows on hover, fills to opaque cyan.",
+      "html": "<button class=\"ds-btn-primary\">RECORD MEMORY</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 8px; padding: 14px 28px; border: 1px solid rgba(154, 230, 245, 0.38); border-radius: 999px; background: rgba(154, 230, 245, 0.12); color: #dff9ff; font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer; transition: all 0.2s ease; } .ds-btn-primary:hover { background: rgba(154, 230, 245, 0.9); color: #101718; box-shadow: 0 0 32px rgba(154, 230, 245, 0.22); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(154, 230, 245, 0.09); } .ds-btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Transparent pill button. Subtle border, muted text, cyan on hover.",
+      "html": "<button class=\"ds-btn-ghost\">LEARN MORE</button>",
+      "css": ".ds-btn-ghost { padding: 14px 20px; border: 1px solid rgba(224, 235, 231, 0.17); border-radius: 999px; background: transparent; color: #9ba7a5; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: all 0.2s ease; } .ds-btn-ghost:hover { border-color: #9ae6f5; color: #9ae6f5; background: rgba(154, 230, 245, 0.04); } .ds-btn-ghost:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(154, 230, 245, 0.09); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Dark-fill monospace input. Cyan focus ring.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"Search memories...\" />",
+      "css": ".ds-input { width: 100%; height: 40px; padding: 0 13px; border: 1px solid rgba(224, 235, 231, 0.17); border-radius: 10px; outline: none; background: rgba(5, 10, 11, 0.36); color: #f1eee7; font-family: 'DM Mono', monospace; font-size: 11px; } .ds-input:focus { border-color: rgba(154, 230, 245, 0.62); box-shadow: 0 0 0 3px rgba(154, 230, 245, 0.08); } .ds-input::placeholder { color: #9ba7a5; }"
+    },
+    {
+      "name": "Memory Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Glass card for memory entries. Hover lifts with cyan glow.",
+      "html": "<div class=\"ds-memory-card\"><div class=\"ds-card-top\"><span>MEMORY</span><span>87%</span></div><div class=\"ds-card-text\">I walked through the garden at dusk...</div><div class=\"ds-card-tags\"><span class=\"ds-tag\">PERSON</span><span class=\"ds-tag\">PLACE</span></div></div>",
+      "css": ".ds-memory-card { min-height: 190px; padding: 20px; border: 1px solid rgba(224, 235, 231, 0.17); border-radius: 14px; background: rgba(229, 235, 226, 0.055); cursor: pointer; transition: background 170ms ease, border-color 170ms ease, transform 170ms ease; } .ds-memory-card:hover { border-color: rgba(154, 230, 245, 0.3); background: rgba(229, 235, 226, 0.09); transform: translateY(-2px); } .ds-card-top { display: flex; justify-content: space-between; color: #9ba7a5; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; } .ds-card-text { margin: 25px 0; font-family: 'Newsreader', serif; font-size: 21px; line-height: 1.25; } .ds-card-tags { display: flex; flex-wrap: wrap; gap: 6px; } .ds-tag { padding: 3px 7px; border: 1px solid rgba(224, 235, 231, 0.17); font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase; }"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Pill-shaped filter toggle. Cyan border + fill when active.",
+      "html": "<button class=\"ds-chip\">ALL</button><button class=\"ds-chip ds-chip--active\">MEMORY</button>",
+      "css": ".ds-chip { padding: 4px 10px; border: 1px solid rgba(224, 235, 231, 0.17); border-radius: 20px; background: transparent; color: #9ba7a5; font-size: 9px; letter-spacing: 0.04em; cursor: pointer; transition: all 0.15s ease; } .ds-chip:hover { border-color: #f1eee7; color: #f1eee7; } .ds-chip--active { border-color: #9ae6f5; background: rgba(154, 230, 245, 0.1); color: #9ae6f5; }"
+    },
+    {
+      "name": "Entity Tag",
+      "kind": "chip",
+      "refersTo": "tag",
+      "description": "Square-cornered tag carrying an entity type's hue.",
+      "html": "<span class=\"ds-entity-tag ds-entity-tag--person\">PERSON</span><span class=\"ds-entity-tag ds-entity-tag--place\">PLACE</span>",
+      "css": ".ds-entity-tag { display: inline-flex; padding: 3px 7px; border: 1px solid currentColor; font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase; } .ds-entity-tag--person { color: #9bbcff; } .ds-entity-tag--place { color: #7ee8d3; } .ds-entity-tag--object { color: #ffd38a; } .ds-entity-tag--concept { color: #e99fd1; } .ds-entity-tag--organization { color: #ffad8a; }"
+    },
+    {
+      "name": "Sidebar Navigation",
+      "kind": "nav",
+      "refersTo": "navigation",
+      "description": "Sticky sidebar with glass background, brand mark, and nav items.",
+      "html": "<nav class=\"ds-sidebar\"><a class=\"ds-nav-item\" href=\"#\" aria-current=\"page\"><span class=\"ds-nav-icon\">●</span><span class=\"ds-nav-label\">ATLAS</span></a><a class=\"ds-nav-item\" href=\"#\"><span class=\"ds-nav-icon\">●</span><span class=\"ds-nav-label\">CATALOG</span></a></nav>",
+      "css": ".ds-sidebar { position: sticky; top: 0; display: flex; height: 100vh; flex-direction: column; padding: 28px 20px 22px; border-right: 1px solid rgba(224, 235, 231, 0.17); background: rgba(8, 13, 14, 0.66); backdrop-filter: blur(24px); } .ds-nav-item { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: center; padding: 13px 12px; border: 1px solid transparent; border-radius: 10px; color: #9ba7a5; text-decoration: none; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; transition: all 0.15s ease; } .ds-nav-item:hover { border-color: rgba(224, 235, 231, 0.17); background: rgba(229, 235, 226, 0.055); color: #f1eee7; } .ds-nav-item[aria-current='page'] { border-color: rgba(154, 230, 245, 0.24); background: rgba(154, 230, 245, 0.08); color: #9ae6f5; }"
+    },
+    {
+      "name": "Brand Mark",
+      "kind": "custom",
+      "refersTo": "brand-mark",
+      "description": "Circular logo with radial cyan+pink dots and pulsing glow.",
+      "html": "<div class=\"ds-brand-mark\"></div>",
+      "css": ".ds-brand-mark { width: 30px; height: 30px; flex: 0 0 auto; border: 1px solid rgba(154, 230, 245, 0.46); border-radius: 50%; background: radial-gradient(circle at 58% 38%, #9ae6f5 0 7%, transparent 8%), radial-gradient(circle at 35% 60%, #e99fd1 0 6%, transparent 7%), radial-gradient(circle at center, rgba(154, 230, 245, 0.13), transparent 68%); box-shadow: 0 0 24px rgba(154, 230, 245, 0.1); animation: ds-mark-pulse 3s ease-in-out infinite; } @keyframes ds-mark-pulse { 0%, 100% { box-shadow: 0 0 24px rgba(154, 230, 245, 0.1); } 50% { box-shadow: 0 0 32px rgba(154, 230, 245, 0.22); } }"
+    },
+    {
+      "name": "Noise Overlay",
+      "kind": "custom",
+      "refersTo": "noise",
+      "description": "Fixed full-screen noise texture at 5.5% opacity for tactile quality.",
+      "html": "<div class=\"ds-noise\"></div>",
+      "css": ".ds-noise { position: fixed; z-index: 10; inset: 0; pointer-events: none; opacity: 0.055; background-image: url(\"data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.28'/%3E%3C/svg%3E\"); mix-blend-mode: screen; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Neural Observatory",
+    "overview": "Neurogram is a private atlas of lived experience, and the design system is its instrument panel. Every surface exists to reduce friction between the user and their memory graph — dark backgrounds recede so that data (nodes, entity tags, activation signals) can glow with meaning. The palette is deliberately restrained: a near-black substrate illuminated by cyan as the primary accent, with warm secondary hues reserved for entity classification. This is not decorative color — it is semantic encoding.\n\nThe system speaks like a neuroscience-informed companion: confident in its domain, contemplative in tone, exact in its language. Precision serves intimacy, not distance. The design rejects the visual grammar of SaaS dashboards, clinical white interfaces, and the 2026 cream/sand/beige monoculture. It is a personal space — no social signals, no sharing prompts, no public-by-default patterns.",
+    "keyCharacteristics": [
+      "Dark substrate with ambient glow — depth through translucency, not shadow",
+      "Cyan as primary accent, warm hues as semantic entity markers",
+      "Serif display (Newsreader) paired with monospace (DM Mono) — editorial meets instrument",
+      "Glass layers and backdrop-filter for surfaces — no hard card chrome",
+      "Noise texture as a physical, tactile layer over the digital substrate",
+      "Reduced motion support throughout — every animation has a static fallback"
+    ],
+    "rules": [
+      { "name": "The Cyan Scarcity Rule", "body": "Cyan appears on ≤8% of any given screen. Its rarity creates hierarchy: the eye knows that cyan means action, signal, or current focus. Overuse destroys the distinction between decoration and meaning.", "section": "colors" },
+      { "name": "The Entity Hue Rule", "body": "Each entity type owns exactly one hue. That hue is used on the dot, the tag border, the tag text, and nothing else for that entity type. Consistency across the entire product is mandatory.", "section": "colors" },
+      { "name": "The Instrument Readout Rule", "body": "Labels, metadata, and status text are always uppercase monospace. This creates a consistent 'readout' feel across every surface.", "section": "typography" },
+      { "name": "The Display Ceiling Rule", "body": "Display headings never exceed 96px (the clamp max). The system's voice is contemplative, not shouting.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "All surfaces are flat at rest. Shadows and glow appear only as a response to state (hover, focus, active).", "section": "elevation" }
+    ],
+    "dos": [
+      "Do use cyan sparingly — it is the primary accent and should appear on ≤8% of any screen",
+      "Do use entity hues consistently — person is always blue, place is always teal, concept is always pink",
+      "Do use Newsreader for all display, headline, and body text",
+      "Do use DM Mono for all labels, metadata, status text, and inputs",
+      "Do verify contrast — body text ≥7:1, muted text ≥4.5:1",
+      "Do use glass translucency for surfaces",
+      "Do use @media (prefers-reduced-motion: reduce) on every animation",
+      "Do use the noise overlay at 5.5% opacity",
+      "Do use backdrop-filter blur (12–24px) for overlays and panels"
+    ],
+    "donts": [
+      "Don't use cream, sand, beige, or warm-tinted near-white backgrounds",
+      "Don't use gradient text (background-clip: text)",
+      "Don't use glassmorphism as default — blur and glass are purposeful",
+      "Don't use numbered eyebrows (01 / 02 / 03) on every section",
+      "Don't use identical card grids — each card type has distinct structure",
+      "Don't use border-left greater than 1px as a colored accent",
+      "Don't pair two similar sans-serif fonts",
+      "Don't use hardcoded z-index values (999, 9999)",
+      "Don't ship a page with no motion",
+      "Don't reinvent standard affordances"
+    ]
+  }
+}

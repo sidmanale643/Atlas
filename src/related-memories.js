@@ -1,3 +1,4 @@
+import { searchMemoriesFts } from "./db.js";
 import { memoryEmbeddingText } from "./vector-store.js";
 
 const ENTITY_SIGNAL_WEIGHTS = Object.freeze({
@@ -9,6 +10,7 @@ const ENTITY_SIGNAL_WEIGHTS = Object.freeze({
 });
 
 const RELATIONSHIP_SIGNAL_WEIGHT = 0.55;
+const BM25_SIGNAL_WEIGHT = 0.3;
 
 export async function getRelatedMemories(
   memoryId,
@@ -16,6 +18,7 @@ export async function getRelatedMemories(
     getMemory,
     getStructuralMemoryLinks,
     searchMemoryVectors,
+    searchMemoriesFts: searchFts,
     serializeMemory,
   },
   { limit = 5, scoreThreshold = 0.65 } = {},
@@ -34,6 +37,19 @@ export async function getRelatedMemories(
     });
   } catch {
     semanticAvailable = false;
+  }
+
+  let bm25Available = true;
+  let bm25Hits = [];
+  try {
+    const textForBm25 = [origin.title, origin.summary, origin.raw_text]
+      .filter(Boolean)
+      .join(" ");
+    bm25Hits = searchFts
+      ? searchFts(textForBm25, { limit: Math.max(limit * 4, 20) })
+      : searchMemoriesFts(textForBm25, { limit: Math.max(limit * 4, 20) });
+  } catch {
+    bm25Available = false;
   }
 
   const candidates = new Map();
@@ -63,6 +79,16 @@ export async function getRelatedMemories(
     ensureCandidate(candidates, candidateId).semanticSimilarity = similarity;
   }
 
+  const maxBm25Score = Math.max(...bm25Hits.map((h) => h.score), 0);
+  for (const hit of bm25Hits) {
+    const candidateId = String(hit.id || "");
+    if (!candidateId || candidateId === String(memoryId)) continue;
+    const normalizedScore = maxBm25Score === 0
+      ? 0
+      : Math.abs(hit.score) / Math.abs(maxBm25Score);
+    ensureCandidate(candidates, candidateId).bm25Score = normalizedScore;
+  }
+
   const links = [...candidates.values()]
     .flatMap((candidate) => {
       const memory = getMemory(candidate.memoryId);
@@ -78,6 +104,9 @@ export async function getRelatedMemories(
       if (candidate.semanticSimilarity != null) {
         signals.push(clamp(candidate.semanticSimilarity, 0, 1));
       }
+      if (candidate.bm25Score != null) {
+        signals.push(clamp(candidate.bm25Score, 0, 1) * BM25_SIGNAL_WEIGHT);
+      }
       const score = combineSignals(signals);
       if (score <= 0) return [];
 
@@ -88,6 +117,7 @@ export async function getRelatedMemories(
         sharedEntities: candidate.sharedEntities,
         sharedRelationships: candidate.sharedRelationships,
         semanticSimilarity: candidate.semanticSimilarity,
+        bm25Score: candidate.bm25Score,
       }];
     })
     .sort(compareLinks)
@@ -97,6 +127,7 @@ export async function getRelatedMemories(
     memoryId: String(memoryId),
     links,
     semanticAvailable,
+    bm25Available,
   };
 }
 
@@ -114,6 +145,7 @@ function ensureCandidate(candidates, memoryId) {
       sharedEntities: [],
       sharedRelationships: [],
       semanticSimilarity: null,
+      bm25Score: null,
     });
   }
   return candidates.get(memoryId);
@@ -133,6 +165,11 @@ function buildReasons(candidate) {
   if (candidate.semanticSimilarity != null) {
     reasons.push(
       `Semantic similarity ${Math.round(candidate.semanticSimilarity * 100)}%`,
+    );
+  }
+  if (candidate.bm25Score != null) {
+    reasons.push(
+      `Keyword relevance ${Math.round(candidate.bm25Score * 100)}%`,
     );
   }
   return reasons;
