@@ -107,6 +107,34 @@ export default function Atlas() {
     document.title = "Atlas · Neurogram";
     // Boot the protected brain after the scaffold is in the DOM.
     import("../viz/brain/app.js");
+
+    // Mirror each region label's role text from the detail panel table onto
+    // a data-role attribute, so a CSS pseudo-element can render it on hover.
+    // The brain module is legacy code we must not modify.
+    const syncRoles = () => {
+      const rows = document.querySelectorAll<HTMLTableRowElement>(
+        ".region-role-table tr[data-region]",
+      );
+      if (!rows.length) return;
+      const roles = new Map<string, string>();
+      rows.forEach((row) => {
+        const region = row.dataset.region;
+        const cell = row.querySelector("td");
+        if (region && cell?.textContent) roles.set(region, cell.textContent.trim());
+      });
+      document
+        .querySelectorAll<HTMLButtonElement>(".region-label[data-region]")
+        .forEach((label) => {
+          const region = label.dataset.region;
+          const role = region ? roles.get(region) : null;
+          if (role) label.setAttribute("data-role", role);
+          else label.removeAttribute("data-role");
+        });
+    };
+    const observer = new MutationObserver(syncRoles);
+    observer.observe(document.body, { childList: true, subtree: true });
+    syncRoles();
+    return () => observer.disconnect();
   }, []);
 
   return (

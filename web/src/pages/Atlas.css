@@ -444,6 +444,12 @@
 }
 .region-labels[hidden] { display: none; }
 
+/* The role table is rendered into the MEMORY CORE band by the legacy brain
+   module (off-limits). We keep it in the DOM so Atlas.tsx's MutationObserver
+   can still mirror `data-role` onto the 3D brain labels, but hide it visually
+   on this surface — areas are surfaced on the 3D model only. */
+.memory-detail .region-role-table { display: none; }
+
 .region-label {
   position: absolute;
   display: inline-flex;
@@ -488,6 +494,47 @@
   background: rgba(17, 19, 24, 0.96);
   outline: none;
   transform: translate(-50%, -50%) scale(1.06);
+}
+
+/* Hover/focus tooltip: shows the region role beneath the 3D label.
+   Role text is mirrored from the detail-panel table via data-role. */
+.region-label[data-role]::after {
+  content: attr(data-role);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  min-width: 220px;
+  max-width: 320px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: var(--glow-soft);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.region-label[data-role]:hover,
+.region-label[data-role]:focus-visible,
+.region-label[data-role].is-focused {
+  z-index: 1000;
+}
+.region-label[data-role]:hover::after,
+.region-label[data-role]:focus-visible::after,
+.region-label[data-role].is-focused::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 /* hippocampus intro note --------------------------------------------------- */
@@ -572,12 +619,14 @@
 
 /* ==========================================================================
    MEMORY DETAIL — selected-memory readout band
+   Single column with a "MEMORY CORE" header at the top, then flat sections
+   separated by hairline rules. No card backgrounds, no boxed cards.
    ========================================================================== */
 .memory-detail {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: 20px 24px;
-  padding: 22px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 0 26px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -593,9 +642,20 @@
 .detail-index {
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--green);
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.detail-index::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
 }
 
 /* ==========================================================================
@@ -734,7 +794,688 @@
 
 @media (max-width: 600px) {
   .memory-detail {
-    grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 14px;
+    padding: 18px 0 22px;
   }
+}
+
+/* ==========================================================================
+   MEMORY DETAIL — sections, chips, activation meter, related-memory rows
+   (legacy 3D brain module injects raw DOM here; we shape it to match the
+   phosphor-lab design: mono labels, serif body, line dividers, no cards)
+   ========================================================================== */
+
+/* ── breadcrumbs ── */
+.detail-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.detail-breadcrumb button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  transition: color 0.14s ease;
+}
+.detail-breadcrumb button:hover { color: var(--green); }
+.breadcrumb-current { color: var(--green-bright); }
+
+/* ── "MEMORY CORE" header ── */
+.detail-index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--green);
+  padding: 4px 0 0;
+}
+
+/* ── copy / body text ── */
+.detail-copy { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 4px 0 0; }
+.detail-copy p {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 18px;
+  line-height: 1.34;
+}
+.detail-summary { color: var(--green-bright) !important; }
+.detail-confidence {
+  display: inline-block;
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  text-transform: lowercase;
+}
+.detail-relationship {
+  font-family: var(--font-mono) !important;
+  font-size: 11px !important;
+  color: var(--muted) !important;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.detail-relationship:last-child { border-bottom: 0; }
+.detail-salience {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+
+/* ── section block (label + content) ── */
+.detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0 4px;
+  border-top: 1px solid var(--line);
+}
+.detail-section:first-of-type { border-top: 0; padding-top: 4px; }
+
+/* The legacy brain module injects an EMOTIONS section and a salience line
+   into the MEMORY CORE band. We surface neither here — areas live on the 3D
+   brain, and the project's copy rule prefers memory-focused framing over
+   neuroscience vocabulary. The DOM stays intact in case other code reads it. */
+.memory-detail .detail-section:has(> .tag-event) { display: none; }
+.memory-detail .detail-salience { display: none; }
+
+.detail-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.detail-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-soft);
+}
+
+/* ── chips (entities / types) ── */
+.entity-chip,
+.detail-section .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px 6px 0;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  cursor: pointer;
+  transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+}
+.entity-chip::before,
+.detail-section .tag::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.entity-chip:hover,
+.detail-section .tag:hover {
+  border-color: var(--green);
+  color: var(--green-bright);
+  background: rgba(56, 130, 246, 0.06);
+}
+.tag-person { color: #8fb6e8; }
+.tag-place { color: #6fcab0; }
+.tag-object { color: #d9b573; }
+.tag-concept { color: #c98fc0; }
+.tag-organization { color: #d99a7e; }
+.tag-event, .tag-relationship { color: var(--green); }
+
+/* ── region / role table — single-column chips; role appears inline on focus/hover ── */
+.region-role-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.region-role-table thead { display: none; }
+.region-role-table tbody { display: contents; }
+.region-role-table tr {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.region-role-table tr:last-child { border-bottom: 0; }
+.region-role-table tr.is-focused { padding-left: 10px; }
+
+.region-role-table th[scope="row"] {
+  text-align: left;
+  padding: 0;
+  color: var(--green-bright);
+  font-weight: 400;
+}
+
+/* Role: hidden by default; revealed on row hover or 3D-brain focus */
+.region-role-table td {
+  display: block;
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  padding: 0;
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.45;
+  transition: max-height 0.2s ease, opacity 0.16s ease, padding 0.16s ease, margin 0.16s ease;
+}
+.region-role-table tr:hover td,
+.region-role-table tr.is-focused td {
+  max-height: 200px;
+  opacity: 1;
+  padding-top: 6px;
+}
+
+.region-role-table button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--green-bright);
+  font: inherit;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.14s ease, color 0.14s ease;
+  text-align: left;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+.region-role-table button:hover { border-bottom-color: var(--green); }
+.region-role-table tr.is-focused th[scope="row"] button { color: var(--green); }
+.region-role-table tr.is-selected th[scope="row"] button {
+  color: #000;
+  background: var(--green);
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+/* ── activation cards (1 per region) ── */
+.activation-detail { display: none; }
+
+.activation-list { display: flex; flex-direction: column; }
+.activation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+  transition: padding-left 0.16s ease;
+}
+.activation-item:last-child { border-bottom: 0; }
+.activation-item.is-focused { padding-left: 10px; }
+.activation-item.is-focused .activation-name { color: var(--green-bright); }
+
+.activation-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: none;
+  border: 0;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+.activation-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+.activation-name i {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.activation-heading strong {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--green);
+  font-weight: 400;
+}
+
+.activation-meter {
+  height: 2px;
+  background: var(--line-soft);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.activation-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--green);
+  transition: width 0.28s ease;
+}
+
+.activation-explanation {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+.activation-explanation summary {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--faint);
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.activation-explanation summary::-webkit-details-marker { display: none; }
+.activation-explanation summary::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 9px;
+  transition: transform 0.16s ease;
+}
+.activation-explanation[open] summary::before { transform: rotate(90deg); }
+.activation-explanation summary:hover { color: var(--green); }
+
+.activation-reasons {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.activation-reasons li {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+}
+.reason-confidence {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--faint);
+  text-transform: lowercase;
+}
+
+.activation-empty {
+  font-family: var(--font-mono) !important;
+  font-size: 12px !important;
+  color: var(--faint) !important;
+}
+
+/* ── hippocampal laterality bar ── */
+.hippocampal-laterality {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  margin-top: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--inset);
+}
+.laterality-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.laterality-heading strong {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--green-bright);
+  font-weight: 400;
+}
+.laterality-heading span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.laterality-meter {
+  position: relative;
+  height: 4px;
+  background: var(--bg-2);
+  border-radius: 2px;
+  overflow: hidden;
+  display: flex;
+}
+.laterality-left, .laterality-right {
+  display: block;
+  height: 100%;
+  transition: width 0.28s ease;
+}
+.laterality-left { background: var(--green-bright); }
+.laterality-right { background: var(--green-mid); }
+.laterality-labels {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.laterality-evidence {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  line-height: 1.42;
+  color: var(--muted);
+}
+.hippocampal-laterality p {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  font-style: italic;
+}
+
+/* ── related memories section ── */
+.related-memory-section { gap: 12px; }
+.related-memory-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+.related-memory-status.related-memory-error { color: #d99a7e; }
+
+.related-memory-list { display: flex; flex-direction: column; gap: 0; }
+.related-memory-button {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 0;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: padding-left 0.16s ease, border-color 0.16s ease;
+}
+.related-memory-list .related-memory-button:first-child { border-top: 0; }
+.related-memory-button:last-child { border-bottom: 0; }
+.related-memory-button:hover:not(:disabled) {
+  padding-left: 10px;
+  border-color: var(--line);
+}
+.related-memory-button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.related-memory-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.related-memory-heading strong {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--green-bright);
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+.related-memory-score {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--green);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.related-memory-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--faint);
+}
+.related-memory-reasons span {
+  display: inline-block;
+  padding: 1px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+}
+.related-memory-metadata {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.text-button {
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  align-self: flex-start;
+}
+.text-button:hover { color: var(--green-bright); border-bottom-color: var(--green); }
+
+/* ── entity-lens state (overrides when an entity is selected) ── */
+.entity-copy { gap: 14px; }
+.entity-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.entity-heading i {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.entity-heading div { display: flex; flex-direction: column; gap: 2px; }
+.entity-heading strong {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--green-bright);
+  text-transform: lowercase;
+}
+.entity-heading span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.entity-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin: 0;
+}
+.entity-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+.entity-status.entity-error { color: #d99a7e; }
+
+.entity-memory-list { display: flex; flex-direction: column; }
+.entity-memory-button {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: padding-left 0.16s ease;
+}
+.entity-memory-button:hover:not(:disabled) { padding-left: 8px; }
+.entity-memory-button:disabled { opacity: 0.4; cursor: not-allowed; }
+.entity-memory-button strong {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--green-bright);
+  line-height: 1.3;
+}
+.entity-memory-button span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.relationship-list { display: flex; flex-direction: column; }
+.relationship-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-soft);
+  cursor: default;
+}
+.relationship-row:last-child { border-bottom: 0; }
+.relationship-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.relationship-entity {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 9px;
+  color: var(--green-bright);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-transform: lowercase;
+  transition: border-color 0.14s ease, color 0.14s ease;
+}
+button.relationship-entity:hover { border-color: var(--green); color: var(--green-bright); }
+.relationship-entity.tag-person { color: #8fb6e8; }
+.relationship-entity.tag-place { color: #6fcab0; }
+.relationship-entity.tag-object { color: #d9b573; }
+.relationship-entity.tag-concept { color: #c98fc0; }
+.relationship-entity.tag-organization { color: #d99a7e; }
+.relationship-predicate {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.relationship-metadata {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.relationship-metadata button {
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 1px;
+  color: var(--muted);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.relationship-metadata button:hover:not(:disabled) { color: var(--green-bright); border-bottom-color: var(--green); }
+.relationship-metadata button:disabled { opacity: 0.4; cursor: not-allowed; }
+.relationship-row blockquote {
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  border-left: 2px solid var(--line);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--muted);
 }
