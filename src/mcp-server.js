@@ -23,7 +23,9 @@ import {
   createMemorySource,
   enqueueAnnotationJob,
   enqueueVectorIndexJob,
+  enqueueIngestionJob,
   getAnnotationStatus,
+  getIngestionStatus,
   getMemorySource,
   getSourceMemoryLinks,
   getVectorIndexStatus,
@@ -31,10 +33,14 @@ import {
   updateMemorySourceStatus,
   withTransaction,
 } from "./db.js";
-import { extractAtomicMemories } from "./llm.js";
+import * as db from "./db.js";
+import { annotateMemory, extractAtomicMemories } from "./llm.js";
 import { getRelatedMemories as deriveRelatedMemories } from "./related-memories.js";
 import { AddMemorySchema } from "./schemas.js";
 import { createIngestionService } from "./ingestion-service.js";
+import { createCognitiveWorker } from "./cognitive-worker.js";
+import { createVectorWorker } from "./vector-worker.js";
+import { createIngestionWorker } from "./ingestion-worker.js";
 import {
   assertAtlasModeSupported,
   deleteMemoryVector,
@@ -52,7 +58,7 @@ const memoryIdSchema = z
 
 const memoryWriteResultSchema = {
   sourceId: z.string().uuid(),
-  status: z.literal("completed"),
+  status: z.enum(["queued", "completed"]),
   memories: z.array(z.object({
     action: z.enum(["created", "updated", "unchanged"]),
     memory: z.object({ id: memoryIdSchema }).passthrough(),
@@ -66,7 +72,21 @@ const memoryWriteResultSchema = {
     })),
     annotationStatus: z.enum(["pending", "processing", "completed", "failed"]),
     indexStatus: z.enum(["pending", "processing", "completed", "failed"]),
-  })),
+  })).default([]),
+};
+
+const sourceStatusResultSchema = {
+  sourceId: z.string().uuid(),
+  status: z.enum(["pending", "processing", "completed", "failed", "extraction_failed"]),
+  ingestionStatus: z
+    .enum(["pending", "processing", "completed", "failed"])
+    .nullable(),
+  memories: z.array(z.object({
+    action: z.enum(["created", "updated", "unchanged"]),
+    memory: z.object({ id: memoryIdSchema }).passthrough(),
+    annotationStatus: z.enum(["pending", "processing", "completed", "failed"]),
+    indexStatus: z.enum(["pending", "processing", "completed", "failed"]),
+  })).default([]),
 };
 
 function toolResult(data) {
@@ -116,7 +136,9 @@ function defaultDependencies() {
     linkSourceMemory,
     enqueueAnnotationJob,
     enqueueVectorIndexJob,
+    enqueueIngestionJob,
     getAnnotationStatus,
+    getIngestionStatus,
     getVectorIndexStatus,
     withTransaction,
     getModel: async () => {
@@ -174,7 +196,7 @@ export function createAtlasMcpServer(overrides = {}) {
     {
       title: "Add memory",
       description:
-        "Save durable source text to Atlas. The source is preserved exactly, split into evidence-backed atomic memories, and each atom is created, updated, or left unchanged. Type and title are optional source-level hints. Returns one consistent source-level result. Do not use for ephemeral chat, secrets, or transient state.",
+        "Save durable source text to Atlas. The source is preserved exactly and queued for background processing: it is split into evidence-backed atomic memories, and each atom is created, updated, or left unchanged. Type and title are optional source-level hints. Returns immediately with `status: \"queued\"` and a `sourceId`; call `get_source_status` with that id to see when extraction completes and which memories were produced. Do not use for ephemeral chat, secrets, or transient state.",
       inputSchema: AddMemorySchema.shape,
       outputSchema: memoryWriteResultSchema,
       annotations: {
@@ -189,7 +211,7 @@ export function createAtlasMcpServer(overrides = {}) {
         const metadata = Object.fromEntries(Object.entries({
           type, title, confidence, tags,
         }).filter(([, value]) => value !== undefined));
-        return toolResult(await dependencies.ingestionService.ingest({
+        return toolResult(await dependencies.ingestionService.enqueue({
           text,
           source: "mcp",
           metadata,
@@ -197,6 +219,42 @@ export function createAtlasMcpServer(overrides = {}) {
       } catch (error) {
         return toolError(`Could not add memory: ${error.message}`);
       }
+    }
+  );
+
+  server.registerTool(
+    "get_source_status",
+    {
+      title: "Get source status",
+      description:
+        "Check the background-processing status of a source previously submitted with `add_memory`. Pass the `sourceId` returned by `add_memory`. Reports the source's extraction `status` (pending, processing, completed, failed), the ingestion job status, and—once completed—the atomic memories that were created, updated, or left unchanged. Use this to confirm that a queued `add_memory` finished before relying on the new memories.",
+      inputSchema: {
+        sourceId: z
+          .string()
+          .uuid()
+          .describe("Source ID returned by add_memory, for example 123e4567-e89b-12d3-a456-426614174000"),
+      },
+      outputSchema: sourceStatusResultSchema,
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ sourceId }) => {
+      const sourceRecord = dependencies.getMemorySource?.(sourceId);
+      if (!sourceRecord) return toolError(`Source not found: ${sourceId}`);
+      const links = dependencies.getSourceMemoryLinks?.(sourceId) || [];
+      return toolResult({
+        sourceId,
+        status: sourceRecord.extraction_status,
+        ingestionStatus: dependencies.getIngestionStatus?.(sourceId) ?? null,
+        memories: links.map((link) => ({
+          action: link.action,
+          memory: getMemoryDetails(link.memory_id)
+            ?? { id: link.memory_id },
+          annotationStatus:
+            dependencies.getAnnotationStatus?.(link.memory_id) ?? "pending",
+          indexStatus:
+            dependencies.getVectorIndexStatus?.(link.memory_id) ?? "pending",
+        })),
+      });
     }
   );
 
@@ -475,12 +533,36 @@ export function createAtlasMcpServer(overrides = {}) {
   return server;
 }
 
+function startInProcessWorkers() {
+  const flag = process.env.ATLAS_INPROCESS_WORKERS;
+  if (flag === "0" || flag === "false") return null;
+
+  const ingestionService = createIngestionService(defaultDependencies());
+  const controller = new AbortController();
+  const workers = [
+    ["ingestion", createIngestionWorker({ db, ingestionService })],
+    ["cognitive", createCognitiveWorker({ db, annotateMemory })],
+    ["vector", createVectorWorker({ db, indexMemoryVector })],
+  ];
+  for (const [name, worker] of workers) {
+    worker.run({ signal: controller.signal }).catch((error) => {
+      console.error(`Atlas ${name} worker stopped: ${error.message}`);
+    });
+  }
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, () => controller.abort());
+  }
+  console.error("Atlas in-process workers running (ingestion, cognitive, vector)");
+  return controller;
+}
+
 export async function runAtlasMcpServer() {
   assertAtlasModeSupported();
   const server = createAtlasMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Atlas MCP server running on stdio");
+  startInProcessWorkers();
 }
 
 const isMain =

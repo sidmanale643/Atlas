@@ -55,12 +55,16 @@ const DEEP_BRAIN_REGIONS = new Set([
   "hippocampus",
   "amygdala",
   "basalGanglia",
+  "entorhinal",
 ]);
 const REGION_SHADER_COUNT = 12;
 const REGION_SHADER_INDEX = Object.freeze(
   Object.fromEntries(REGION_SHADER_ORDER.map((name, i) => [name, i])),
 );
 let brainHighlightMaterial = null;
+let interiorGlowGroup = null;
+const interiorGlows = [];
+let interiorGlowTexture = null;
 const REGION_MARKER_SHAPES = Object.freeze({
   prefrontal: {
     scale: [0.72, 0.38, 0.28],
@@ -2225,15 +2229,22 @@ const REGION_SHADER_GLSL = `
   uniform float uRegionBilateral[${REGION_SHADER_COUNT}];
   uniform float uRegionWeights[${REGION_SHADER_COUNT}];
   uniform float uRegionEmphasis[${REGION_SHADER_COUNT}];
+  uniform float uRegionPhase[${REGION_SHADER_COUNT}];
   uniform float uHighlightStrength;
+  uniform float uTime;
   uniform vec3 uModelCenter;
   uniform vec3 uBaseColor;
   uniform vec3 uEmissiveColor;
 
   varying vec3 vObjPosition;
+  varying vec3 vViewNormal;
+  varying vec3 vViewPosition;
 
-  vec3 computeRegionHighlight(vec3 rawPos) {
+  // Accumulated colour plus a separate "peak" channel so we can size the alpha
+  // off the strongest single contribution rather than the summed total.
+  vec4 computeRegionHighlight(vec3 rawPos) {
     vec3 totalColor = vec3(0.0);
+    float peak = 0.0;
     vec3 objPos = rawPos - uModelCenter;
 
     for (int i = 0; i < ${REGION_SHADER_COUNT}; i++) {
@@ -2253,35 +2264,58 @@ const REGION_SHADER_GLSL = `
       vec3 d = (vec3(px, objPos.y, objPos.z) - center) / radius;
       float dist = length(d);
 
-      float highlight = (1.0 - smoothstep(0.3, 1.0, dist)) * w;
-      highlight *= uRegionEmphasis[i];
+      // Bright tight core + a wide feathered halo. Widening the halo's outer
+      // bound past 1.0 keeps thin cortical patches from dropping out entirely.
+      float core = 1.0 - smoothstep(0.0, 0.55, dist);
+      float halo = 1.0 - smoothstep(0.45, 1.2, dist);
+      float field = core + halo * 0.5;
+      if (field <= 0.0) continue;
 
-      totalColor += uRegionColors[i] * highlight;
+      // Lift low activations so faint regions still register, then apply
+      // focus emphasis and a slow per-region breathing pulse.
+      float wv = pow(clamp(w, 0.0, 1.0), 0.55);
+      float pulse = 1.0 + 0.12 * sin(uTime * 1.6 + uRegionPhase[i]);
+      float intensity = field * wv * uRegionEmphasis[i] * pulse;
+
+      totalColor += uRegionColors[i] * intensity;
+      peak = max(peak, intensity);
     }
 
-    float maxColor = max(totalColor.r, max(totalColor.g, totalColor.b));
-    if (maxColor > 1.0) {
-      totalColor /= maxColor;
-    }
-
-    return totalColor;
+    return vec4(totalColor, peak);
   }
 
   void main() {
-    vec3 highlight = computeRegionHighlight(vObjPosition);
+    vec4 hi = computeRegionHighlight(vObjPosition);
+    vec3 highlight = hi.rgb;
+    float peak = hi.w;
     float intensity = uHighlightStrength;
-    float alpha = min(max(highlight.r, max(highlight.g, highlight.b)) * intensity * 1.5, 1.0);
-    vec3 emissive = highlight * uEmissiveColor * intensity;
-    gl_FragColor = vec4(highlight + emissive * 0.3, alpha);
+
+    // Fresnel rim so the glow wraps the silhouette instead of reading as a flat decal.
+    vec3 viewDir = normalize(-vViewPosition);
+    float fresnel = pow(1.0 - clamp(dot(normalize(vViewNormal), viewDir), 0.0, 1.0), 2.0);
+    vec3 rimColor = highlight * fresnel * 0.6;
+
+    vec3 col = (highlight + rimColor) * intensity;
+    // Soft tonemap instead of a hard normalize keeps overlapping regions saturated.
+    col = col / (col + vec3(0.55));
+
+    float lum = max(col.r, max(col.g, col.b));
+    float alpha = clamp(lum * 1.4 + peak * intensity * 0.5 + fresnel * peak * 0.25, 0.0, 1.0);
+    gl_FragColor = vec4(col, alpha);
   }
 `;
 
 const REGION_SHADER_VERTEX_GLSL = `
   precision highp float;
   varying vec3 vObjPosition;
+  varying vec3 vViewNormal;
+  varying vec3 vViewPosition;
   void main() {
     vObjPosition = position;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vViewNormal = normalize(normalMatrix * normal);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
   }
 `;
 
@@ -2299,22 +2333,30 @@ function applyBrainMaterial(model) {
     uRegionBilateral: { value: [] },
     uRegionWeights: { value: new Float32Array(REGION_SHADER_COUNT).fill(0) },
     uRegionEmphasis: { value: new Float32Array(REGION_SHADER_COUNT).fill(1) },
+    uRegionPhase: { value: new Float32Array(REGION_SHADER_COUNT).fill(0) },
     uHighlightStrength: { value: 0.0 },
+    uTime: { value: 0.0 },
     uModelCenter: { value: modelCenter },
     uBaseColor: { value: new THREE.Color('#f4eee2') },
     uEmissiveColor: { value: new THREE.Color('#9bb9bc') },
   };
 
-  const shaderRegions = getRegionShaderData().map((data) => {
+  const shaderRegions = getRegionShaderData().map((data, index) => {
     let regionKey = data.name;
     if (regionKey === "hippocampusLeft" || regionKey === "hippocampusRight") {
       regionKey = "hippocampus";
     }
+    // Out-of-sync breathing so regions don't pulse in lockstep.
+    highlightUniforms.uRegionPhase.value[index] = index * 0.73;
     return {
+      name: data.name,
       center: data.center,
       radius: data.radius,
       color: REGION_COLORS[regionKey],
       bilateral: data.bilateral,
+      deep: data.deep,
+      phase: index * 0.73,
+      shaderIndex: index,
     };
   });
 
@@ -2355,15 +2397,120 @@ function applyBrainMaterial(model) {
   brainHighlightMaterial.userData.shader = highlightMaterial;
   brainHighlightMaterial.userData.regionWeights = highlightUniforms.uRegionWeights.value;
   brainHighlightMaterial.userData.regionEmphasis = highlightUniforms.uRegionEmphasis.value;
+
+  buildInteriorGlows(shaderRegions);
+}
+
+// A soft radial-gradient sprite texture used for the deep-region inner glow.
+function getInteriorGlowTexture() {
+  if (interiorGlowTexture) return interiorGlowTexture;
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(
+    size / 2, size / 2, 0,
+    size / 2, size / 2, size / 2,
+  );
+  gradient.addColorStop(0.0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.35, "rgba(255,255,255,0.55)");
+  gradient.addColorStop(0.7, "rgba(255,255,255,0.12)");
+  gradient.addColorStop(1.0, "rgba(255,255,255,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  interiorGlowTexture = new THREE.CanvasTexture(canvas);
+  interiorGlowTexture.colorSpace = THREE.SRGBColorSpace;
+  return interiorGlowTexture;
+}
+
+// Deep structures (hippocampus, amygdala, entorhinal, basal ganglia) sit inside
+// the volume where the cortical surface never reaches them, so the surface glow
+// alone leaves them dark. These additive sprites sit at each region's interior
+// centre and read as light glowing from within the translucent shell.
+function buildInteriorGlows(shaderRegions) {
+  interiorGlows.length = 0;
+  interiorGlowGroup = new THREE.Group();
+  interiorGlowGroup.name = "interior-glows";
+
+  const texture = getInteriorGlowTexture();
+
+  const addGlow = (region, position) => {
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      color: new THREE.Color(region.color),
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+      opacity: 0,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(...position);
+    // Size to the region's spread; sprites are camera-facing so we use the
+    // largest radius component, scaled up so the soft falloff covers the lobe.
+    const baseScale = Math.max(...region.radius) * 2.4;
+    sprite.scale.setScalar(baseScale);
+    sprite.visible = false;
+    sprite.renderOrder = 0;
+    interiorGlowGroup.add(sprite);
+
+    interiorGlows.push({
+      sprite,
+      shaderIndex: region.shaderIndex,
+      baseScale,
+      phase: region.phase,
+    });
+  };
+
+  shaderRegions
+    .filter((region) => region.deep)
+    .forEach((region) => {
+      addGlow(region, region.center);
+      // Bilateral regions are stored once on +X but lit on both hemispheres by
+      // the surface shader, so mirror the inner glow to match.
+      if (region.bilateral) {
+        const [x, y, z] = region.center;
+        addGlow(region, [-x, y, z]);
+      }
+    });
+}
+
+// Drive each interior glow off the same shader weights/emphasis the surface uses,
+// with the matching breathing pulse. Called every frame from the animate loop.
+function updateInteriorGlows(time) {
+  if (!brainHighlightMaterial?.userData.regionWeights) return;
+  const weights = brainHighlightMaterial.userData.regionWeights;
+  const emphasis = brainHighlightMaterial.userData.regionEmphasis;
+
+  interiorGlows.forEach((glow) => {
+    const w = weights[glow.shaderIndex] || 0;
+    if (w <= 0.001) {
+      glow.sprite.visible = false;
+      return;
+    }
+    const e = emphasis[glow.shaderIndex] || 1;
+    const wv = Math.pow(THREE.MathUtils.clamp(w, 0, 1), 0.55);
+    const pulse = 1 + 0.12 * Math.sin(time * 1.6 + glow.phase);
+    const intensity = wv * e * pulse;
+
+    glow.sprite.visible = true;
+    glow.sprite.material.opacity = Math.min(intensity * 0.85, 1);
+    glow.sprite.scale.setScalar(glow.baseScale * (0.82 + wv * 0.45) * pulse);
+  });
 }
 
 function updateBrainShaderUniforms() {
   if (!brainHighlightMaterial?.userData.shader) return;
+  // Freeze the breathing pulse when the user prefers reduced motion.
+  const time = reduceMotion.matches ? 0 : performance.now() * 0.001;
   const highlightMat = brainHighlightMaterial.userData.shader;
   if (highlightMat.isShaderMaterial) {
     highlightMat.uniforms.uRegionCount.value = REGION_SHADER_COUNT;
     highlightMat.uniforms.uHighlightStrength.value = 1.0;
+    highlightMat.uniforms.uTime.value = time;
   }
+  updateInteriorGlows(time);
 }
 
 function setBrainRegionShaderWeight(regionIndex, weight, emphasis = 1) {
@@ -2480,7 +2627,12 @@ function updateRegionLabels() {
     button.className = "region-label";
     button.dataset.region = region;
     button.dataset.role = anchor.role;
+    if (DEEP_BRAIN_REGIONS.has(region)) button.dataset.deep = "true";
     button.style.setProperty("--region-color", anchor.color);
+    button.style.setProperty(
+      "--region-weight",
+      THREE.MathUtils.clamp(Number(weight) || 0, 0, 1).toFixed(3),
+    );
     button.setAttribute(
       "aria-label",
       `Focus ${anchor.label}, ${formatPercent(weight)} activation`,
@@ -3581,6 +3733,7 @@ function renderBrainModel() {
       entityLensGroup,
       memoryNodeGroup,
     );
+    if (interiorGlowGroup) brainContent.add(interiorGlowGroup);
     brain.add(brainContent);
     renderMemoryNodes();
     updateActivationConnections();

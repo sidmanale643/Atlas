@@ -177,7 +177,7 @@ export default function Landing() {
           <Wordmark />
         </motion.div>
         <nav className={styles.topnav} aria-label="Primary">
-          <motion.a href="#extraction" variants={fadeUp}>Extraction</motion.a>
+          <motion.a href="/how-it-works" variants={fadeUp}>How it works</motion.a>
           <motion.a href="#architecture" variants={fadeUp}>Architecture</motion.a>
           <motion.a href="#mcp" variants={fadeUp}>Connect</motion.a>
           <motion.a href="#science" variants={fadeUp}>Science</motion.a>
@@ -211,7 +211,7 @@ export default function Landing() {
               <a className="nrg-btn nrg-btn--solid" href="/atlas">
                 Open the atlas →
               </a>
-              <a className="nrg-btn" href="#extraction">
+              <a className="nrg-btn" href="/how-it-works">
                 See how it works
               </a>
             </div>

@@ -520,12 +520,29 @@
     opacity 140ms ease, transform 140ms ease;
 }
 .region-label i {
-  width: 7px;
-  height: 7px;
+  position: relative;
+  width: 8px;
+  height: 8px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: var(--region-color, var(--green));
-  box-shadow: 0 0 9px var(--region-color, var(--green));
+  background: radial-gradient(
+    circle at 50% 42%,
+    #fff,
+    var(--region-color, var(--green)) 62%,
+    color-mix(in srgb, var(--region-color, var(--green)) 70%, #000) 100%
+  );
+  /* Glow intensity tracks the region's activation weight. */
+  box-shadow:
+    0 0 calc(5px + var(--region-weight, 0.4) * 8px)
+      color-mix(in srgb, var(--region-color, var(--green)) 90%, transparent),
+    0 0 calc(10px + var(--region-weight, 0.4) * 16px)
+      color-mix(in srgb, var(--region-color, var(--green)) 45%, transparent);
+  animation: region-dot-breathe 3.2s ease-in-out infinite;
+}
+/* Deep limbic structures read as a ringed/hollow dot vs. solid cortical dots. */
+.region-label[data-deep="true"] i {
+  background: color-mix(in srgb, var(--region-color, var(--green)) 22%, transparent);
+  border: 1.5px solid var(--region-color, var(--green));
 }
 .region-label strong {
   color: var(--region-color, var(--green-bright));
@@ -537,8 +554,37 @@
 .region-label.is-focused {
   border-color: var(--region-color, var(--green));
   background: rgba(17, 19, 24, 0.96);
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.5),
+    0 0 18px color-mix(in srgb, var(--region-color, var(--green)) 28%, transparent);
   outline: none;
-  transform: translate(-50%, -50%) scale(1.06);
+  transform: translate(-50%, -50%) scale(1.08);
+}
+.region-label:hover i,
+.region-label:focus-visible i,
+.region-label.is-focused i {
+  box-shadow:
+    0 0 8px var(--region-color, var(--green)),
+    0 0 20px color-mix(in srgb, var(--region-color, var(--green)) 70%, transparent);
+  animation-duration: 1.8s;
+}
+
+@keyframes region-dot-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.18);
+    filter: brightness(1.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .region-label i {
+    animation: none;
+  }
 }
 
 /* Hover/focus tooltip: shows the region role beneath the 3D label.

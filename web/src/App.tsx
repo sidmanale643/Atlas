@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
 import Landing from "./pages/Landing";
+import HowItWorks from "./pages/HowItWorks";
 import Atlas from "./pages/Atlas";
 import Catalog from "./pages/Catalog";
 import Compare from "./pages/Compare";
@@ -11,6 +12,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/landing" element={<Landing />} />
+      <Route path="/how-it-works" element={<HowItWorks />} />
       <Route element={<Layout />}>
         <Route path="/atlas" element={<Atlas />} />
         <Route path="/memories" element={<Catalog view="memories" />} />

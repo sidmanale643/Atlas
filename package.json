@@ -26,6 +26,7 @@
     "qdrant:sync": "node scripts/sync-memory-vectors.js",
     "worker:cognitive": "node src/run-cognitive-worker.js",
     "worker:vector": "node src/run-vector-worker.js",
+    "worker:ingestion": "node src/run-ingestion-worker.js",
     "audit": "node src/audit.js",
     "eval:v3": "node scripts/evaluate-extraction-v3.js",
     "test": "node --test tests/*.test.js"
