@@ -29,6 +29,11 @@
   background: rgba(17, 19, 24, 0.78);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.topbarScrolled {
+  border-bottom-color: var(--line-strong);
+  box-shadow: 0 1px 12px rgba(56, 130, 246, 0.08);
 }
 
 .wordmark {
@@ -39,12 +44,21 @@
   font-family: var(--font-serif);
   font-size: 22px;
   letter-spacing: 0.01em;
+  transition: filter 0.2s ease;
+}
+.wordmark:hover {
+  filter: drop-shadow(0 0 6px rgba(56, 130, 246, 0.35));
 }
 .glyph {
   width: 24px;
   height: 24px;
   color: var(--green);
   filter: drop-shadow(0 0 4px rgba(56, 130, 246, 0.4));
+  transition: filter 0.2s ease, transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.wordmark:hover .glyph {
+  filter: drop-shadow(0 0 10px rgba(56, 130, 246, 0.6));
+  transform: rotate(90deg);
 }
 
 .topnav {
@@ -57,13 +71,19 @@
   font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--muted);
-  transition: color 0.15s ease;
+  transition: color 0.15s ease, text-shadow 0.15s ease;
 }
 .topnav > a:hover {
   color: var(--green-bright);
+  text-shadow: 0 0 8px rgba(56, 130, 246, 0.3);
 }
 .barCta {
   color: var(--green);
+  transition: color 0.15s ease, text-shadow 0.15s ease, box-shadow 0.15s ease;
+}
+.barCta:hover {
+  text-shadow: none;
+  box-shadow: 0 0 12px rgba(56, 130, 246, 0.25);
 }
 @media (max-width: 720px) {
   .topnav > a:not(.barCta) {
@@ -75,7 +95,7 @@
 
 .hero {
   position: relative;
-  padding: clamp(36px, 6vw, 72px) var(--pad) clamp(28px, 5vw, 56px);
+  padding: clamp(12px, 2vw, 24px) var(--pad) clamp(16px, 3vw, 32px);
   border-bottom: 1px solid var(--line);
   overflow: hidden;
 }
@@ -100,7 +120,7 @@
 }
 
 .heroCoord {
-  margin: 0 0 22px;
+  margin: 0 0 10px;
 }
 
 .heroTitle {
@@ -118,7 +138,7 @@
 
 .heroSub {
   max-width: 60ch;
-  margin: 18px 0 0;
+  margin: 14px 0 0;
   font-family: var(--font-mono);
   font-size: clamp(13px, 1.4vw, 15px);
   line-height: 1.7;
@@ -129,7 +149,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
-  margin-top: 22px;
+  margin-top: 18px;
 }
 
 /* oscilloscope phosphor trace */
@@ -137,7 +157,7 @@
   display: block;
   width: 100%;
   height: 64px;
-  margin: 24px 0 8px;
+  margin: 18px 0 6px;
   opacity: 0.85;
 }
 .scopeLine {
@@ -159,11 +179,11 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0;
-  margin: 18px 0 0;
+  margin: 14px 0 0;
   border-top: 1px solid var(--line);
 }
 .metric {
-  padding: 20px 20px 4px 0;
+  padding: 16px 16px 4px 0;
   border-right: 1px solid var(--line-soft);
 }
 .metric:last-child {
@@ -213,15 +233,15 @@
 /* ----------------------------------------------------------------- sections */
 
 .section {
-  padding: clamp(32px, 5vw, 64px) var(--pad);
+  padding: clamp(24px, 4vw, 48px) var(--pad);
 }
 
 .sectionHead {
   max-width: 70ch;
-  margin-bottom: clamp(20px, 3vw, 36px);
+  margin-bottom: clamp(16px, 2vw, 28px);
 }
 .sectionHead .rule-label {
-  margin-bottom: 22px;
+  margin-bottom: 16px;
 }
 .sectionHead h2 {
   font-family: var(--font-serif);
@@ -247,7 +267,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.3fr);
   align-items: stretch;
-  gap: clamp(20px, 3vw, 44px);
+  gap: clamp(16px, 2.5vw, 36px);
 }
 @media (max-width: 880px) {
   .lab {
@@ -258,8 +278,8 @@
 .labInput {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding-top: 6px;
+  gap: 12px;
+  padding-top: 4px;
 }
 .labSentence {
   margin: 0;
@@ -291,8 +311,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding-top: 12px;
+  gap: 8px;
+  padding-top: 8px;
 }
 .labArrowLine {
   width: 1px;
@@ -327,9 +347,9 @@
 .labOutput {
   display: grid;
   grid-template-columns: 1fr 1.3fr;
-  gap: clamp(20px, 3vw, 40px);
+  gap: clamp(16px, 2.5vw, 32px);
   border-left: 1px solid var(--line);
-  padding-left: clamp(20px, 3vw, 40px);
+  padding-left: clamp(16px, 2.5vw, 32px);
 }
 @media (max-width: 880px) {
   .labOutput {
@@ -383,7 +403,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  padding: 9px 0;
+  padding: 7px 0;
   border-bottom: 1px solid var(--line-soft);
 }
 .entList b {
@@ -612,7 +632,7 @@
 
 /* ---- note below chart ---- */
 .archNote {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--faint);
@@ -629,7 +649,7 @@
 .mcp {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-  gap: clamp(28px, 5vw, 72px);
+  gap: clamp(22px, 4vw, 56px);
   align-items: start;
 }
 @media (max-width: 880px) {
@@ -642,10 +662,10 @@
   font-size: clamp(30px, 4.4vw, 52px);
   line-height: 1;
   color: var(--green-bright);
-  margin: 22px 0 0;
+  margin: 16px 0 0;
 }
 .mcpCopy > p {
-  margin: 22px 0 0;
+  margin: 16px 0 0;
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.7;
@@ -662,7 +682,7 @@
 .mcpRight {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 18px;
 }
 
 .mcpTerminal {
@@ -686,7 +706,7 @@
 }
 .mcpCode {
   margin: 0;
-  padding: 16px 18px;
+  padding: 14px 16px;
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.7;
@@ -714,7 +734,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 11px 14px 11px 0;
+  padding: 8px 12px 8px 0;
   border-bottom: 1px solid var(--line-soft);
   transition: background 0.15s ease, padding-left 0.15s ease;
 }
@@ -741,7 +761,7 @@
 /* ------------------------------------------------------------------- science */
 
 .quote {
-  margin: 0 0 clamp(40px, 6vw, 64px);
+  margin: 0 0 clamp(28px, 4vw, 48px);
   max-width: 22ch;
   font-family: var(--font-serif);
   font-size: clamp(30px, 5vw, 60px);
@@ -766,14 +786,14 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 30px 34px 30px 0;
+  gap: 8px;
+  padding: 22px 28px 22px 0;
   border-bottom: 1px solid var(--line-soft);
   border-right: 1px solid var(--line-soft);
 }
 .principles li:nth-child(2n) {
   border-right: 0;
-  padding-left: 34px;
+  padding-left: 28px;
 }
 .principleIndex {
   font-family: var(--font-mono);
@@ -793,7 +813,7 @@
   }
   .principles li,
   .principles li:nth-child(2n) {
-    padding: 24px 0;
+    padding: 18px 0;
     border-right: 0;
   }
 }
@@ -812,7 +832,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 22px 0;
+  padding: 18px 0;
   cursor: pointer;
   list-style: none;
   font-family: var(--font-serif);
@@ -860,7 +880,7 @@
 }
 .faqItem p {
   margin: 0;
-  padding: 0 0 24px;
+  padding: 0 0 18px;
   max-width: 75ch;
   font-family: var(--font-mono);
   font-size: 13.5px;
@@ -872,7 +892,7 @@
 
 .ctaBand {
   position: relative;
-  padding: clamp(40px, 7vw, 80px) var(--pad);
+  padding: clamp(28px, 5vw, 56px) var(--pad);
   border-block: 1px solid var(--line);
   overflow: hidden;
   text-align: center;
@@ -904,7 +924,7 @@
 .ctaBand .heroCta {
   position: relative;
   justify-content: center;
-  margin-top: 34px;
+  margin-top: 24px;
 }
 
 /* ------------------------------------------------------------------- footer */
@@ -914,8 +934,8 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 30px var(--pad);
+  gap: 14px;
+  padding: 22px var(--pad);
 }
 .footerLinks {
   display: flex;
@@ -985,5 +1005,8 @@
   .archPipe {
     animation: none;
     stroke-dashoffset: 0;
+  }
+  .wordmark:hover .glyph {
+    transform: none;
   }
 }

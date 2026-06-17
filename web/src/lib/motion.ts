@@ -1,5 +1,5 @@
 /* ============================================================================
-   Shared motion vocabulary for the Neurogram SPA.
+   Shared motion vocabulary for the Atlas SPA.
    One place to tune timing so every page moves on the same instrument-like curve:
    short durations, small offsets, gentle easing. Honor prefers-reduced-motion via
    <MotionConfig reducedMotion="user"> in main.tsx (collapses these automatically).

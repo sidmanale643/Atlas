@@ -1,0 +1,289 @@
+/* ============================================================================
+   InteractiveArchitecture — phosphor-style interactive SVG diagram
+   Matches the landing page's "phosphor lab instrument" design system.
+   ========================================================================== */
+
+.wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 640px;
+  cursor: default;
+}
+
+/* ---- tier labels ---- */
+.tierLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  fill: var(--green);
+}
+
+/* ---- capture pipeline nodes ---- */
+.node {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.node:hover {
+  opacity: 0.8;
+}
+.node rect {
+  fill: var(--bg-2);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  transition: stroke 0.2s ease, fill 0.2s ease;
+}
+.node:hover rect {
+  stroke: var(--green);
+}
+.nodeActive rect {
+  stroke: var(--green-bright);
+  stroke-width: 1.5;
+  fill: rgba(56, 130, 246, 0.06);
+}
+
+.nodeTitle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--text);
+  pointer-events: none;
+}
+
+/* ---- arrows between capture nodes ---- */
+.arrow {
+  stroke: var(--green);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+  animation: arrowFlow 1.2s linear infinite;
+  pointer-events: none;
+}
+.arrowHead {
+  fill: var(--green);
+  pointer-events: none;
+}
+
+@keyframes arrowFlow {
+  from { stroke-dashoffset: 14; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* ---- animated flow pipes ---- */
+.pipe {
+  stroke: var(--green);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 4;
+  animation: pipeFlow 1.8s linear infinite;
+  pointer-events: none;
+}
+.pipeHead {
+  fill: var(--green);
+  pointer-events: none;
+}
+
+@keyframes pipeFlow {
+  from { stroke-dashoffset: 20; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* ---- store nodes ---- */
+.storeNode {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.storeNode:hover {
+  opacity: 0.8;
+}
+.storeNode rect {
+  fill: var(--bg-2);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  transition: stroke 0.2s ease;
+}
+.storeNode:hover rect {
+  stroke: var(--green);
+}
+.nodeActive rect {
+  stroke: var(--green-bright);
+  stroke-width: 1.5;
+}
+
+.storeName {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--text);
+  pointer-events: none;
+}
+.storeCode {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--text);
+  pointer-events: none;
+}
+.storeRole {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--text);
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+.storeDetail {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--text);
+  pointer-events: none;
+}
+
+/* ---- recall nodes ---- */
+.recallNode {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.recallNode:hover {
+  opacity: 0.8;
+}
+.recallNode rect {
+  fill: var(--bg-2);
+  stroke: var(--line);
+  stroke-width: 1;
+  transition: stroke 0.2s ease;
+}
+.recallNode:hover rect {
+  stroke: var(--green);
+}
+.nodeActive.recallNode rect {
+  stroke: var(--green-bright);
+  stroke-width: 1.5;
+}
+
+.recallName {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--text);
+  pointer-events: none;
+}
+.recallDesc {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--text);
+  pointer-events: none;
+}
+.recallTag {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--text);
+  pointer-events: none;
+}
+
+/* ---- user / MCP node ---- */
+.userNode {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.userNode:hover {
+  opacity: 0.8;
+}
+.userNode rect {
+  fill: rgba(56, 130, 246, 0.1);
+  stroke: var(--green);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 2;
+  transition: stroke 0.2s ease, fill 0.2s ease;
+}
+.userNode:hover rect {
+  fill: rgba(56, 130, 246, 0.16);
+}
+.nodeActive.userNode rect {
+  stroke: var(--green-bright);
+  stroke-width: 2;
+  fill: rgba(56, 130, 246, 0.18);
+}
+
+.userLabel {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  fill: var(--green-bright);
+  pointer-events: none;
+}
+
+/* ---- detail panel overlay ---- */
+.detailForeign {
+  pointer-events: none;
+}
+
+.detailPanel {
+  pointer-events: auto;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  position: relative;
+  animation: panelIn 0.2s ease;
+  box-shadow: 0 0 40px rgba(56, 130, 246, 0.08);
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.detailClose {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 1px 6px;
+  pointer-events: none;
+}
+
+.detailTitle {
+  margin: 0 0 10px;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  color: var(--green-bright);
+  line-height: 1.2;
+}
+
+.detailLine {
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.detailLineDim {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--faint);
+}
+
+/* ---- reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .arrow,
+  .pipe {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .detailPanel {
+    animation: none;
+  }
+}

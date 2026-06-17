@@ -8,6 +8,8 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import type { EntityResolutionSuggestion } from "../lib/api";
+
+type RelatedMemoryLink = Awaited<ReturnType<typeof api.getMemoryLinks>>["links"][number];
 import type {
   EntityCatalogItem,
   EntityKind,
@@ -55,6 +57,7 @@ const MEMORY_COLUMNS: ColumnConfig[] = [
   { key: "title", label: "Memory", sortable: true },
   { key: "type", label: "Type", sortable: true },
   { key: "entities", label: "Entities" },
+  { key: "linked", label: "Linked", sortable: true },
   { key: "source", label: "Source", sortable: true },
   { key: "confidence", label: "Confidence", sortable: true },
   { key: "created_at", label: "Created", sortable: true },
@@ -224,6 +227,9 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
   const [entityDetails, setEntityDetails] = useState<
     Record<string, DetailState<EntityGraph>>
   >({});
+  const [relatedMemories, setRelatedMemories] = useState<
+    Record<string, { loading?: boolean; links?: RelatedMemoryLink[]; error?: string }>
+  >({});
 
   /* --- comparison selection (memories only) --- */
   const [selected, setSelected] = useState<Map<string, string>>(new Map());
@@ -233,7 +239,7 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
 
   /* --- document title --- */
   useEffect(() => {
-    document.title = `${config.title} · Neurogram`;
+    document.title = `${config.title} · Atlas`;
   }, [config.title]);
 
   /* --- sync URL whenever query state changes --- */
@@ -397,6 +403,23 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
             },
           })),
         );
+      if (!relatedMemories[key]) {
+        setRelatedMemories((prev) => ({ ...prev, [key]: { loading: true } }));
+        api
+          .getMemoryLinks(key, { limit: 5 })
+          .then((result) =>
+            setRelatedMemories((prev) => ({
+              ...prev,
+              [key]: { links: result.links },
+            })),
+          )
+          .catch(() =>
+            setRelatedMemories((prev) => ({
+              ...prev,
+              [key]: { links: [] },
+            })),
+          );
+      }
     } else {
       if (entityDetails[key] && !entityDetails[key].error) return;
       setEntityDetails((prev) => ({ ...prev, [key]: { loading: true } }));
@@ -763,6 +786,13 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
           </td>
           <td>{capitalize(memory.type)}</td>
           <td>{renderTagCell(memory.entities)}</td>
+          <td>
+            {memory.linked_count > 0 ? (
+              <span className={styles.linkedCount}>{memory.linked_count}</span>
+            ) : (
+              <span className={styles.muted}>0</span>
+            )}
+          </td>
           <td>{memory.source === "mcp" ? "Agent" : "User"}</td>
           <td>{formatPercent(memory.confidence)}</td>
           <td>{formatDate(memory.created_at)}</td>
@@ -880,55 +910,150 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
         ? (rawExtraction as { model?: string; schema_version?: number })
         : {};
 
+    const related = relatedMemories[String(id)];
+    const relatedLinks = related?.links || [];
+
     return (
-      <div className={styles.detailGrid}>
-        <DetailSection title="Full memory" wide>
-          <p className={styles.proseText}>{memory.raw_text || "Not available"}</p>
-        </DetailSection>
+      <div className={styles.detailCards}>
+        {/* Memory Core */}
+        <section className={styles.detailCard}>
+          <h3 className={styles.detailCardTitle}>
+            <span className={styles.detailIcon} aria-hidden="true">CORE</span>
+            Memory Core
+          </h3>
+          <div className={styles.detailCardBody}>
+            <div className={styles.detailField}>
+              <div className={styles.detailFieldIcon} aria-hidden="true">TXT</div>
+              <div>
+                <span className={styles.detailFieldLabel}>Raw Memory</span>
+                <p className={styles.detailFieldValue}>{memory.raw_text || "Not available"}</p>
+              </div>
+            </div>
+            <div className={styles.detailField}>
+              <div className={styles.detailFieldIcon} aria-hidden="true">SUM</div>
+              <div>
+                <span className={styles.detailFieldLabel}>Summary</span>
+                <p className={`${styles.detailFieldValue} ${styles.detailSummaryHighlight}`}>
+                  {extraction.summary || memory.summary || "Not available"}
+                </p>
+              </div>
+            </div>
+            {meta.model && (
+              <div className={styles.detailFieldMeta}>
+                <span>Model: {meta.model}</span>
+                {meta.schema_version != null && <span>Schema: {meta.schema_version}</span>}
+                {extraction.salience != null && <span>Salience: {formatPercent(extraction.salience)}</span>}
+              </div>
+            )}
+          </div>
+        </section>
 
-        <ListSection
-          title="Entities"
-          items={(memory.entities || []).map(
-            (e) =>
-              `${e.canonical_name} · ${e.kind} · ${formatPercent(e.confidence)}`,
-          )}
-        />
-        <ListSection
-          title="Relationships"
-          items={(memory.relationships || []).map((r) => {
-            const src = r.source_name || r.source?.canonical_name;
-            const tgt = r.target_name || r.target?.canonical_name;
-            return `${src} ${r.predicate} ${tgt}`;
-          })}
-        />
-        <ListSection
-          title="Brain regions"
-          items={(memory.regions || []).map(
-            (r) => `${humanize(r.region)} · ${formatPercent(r.weight)}`,
-          )}
-        />
-        <ListSection title="Tags" items={memory.tags || []} />
+        {/* Entities */}
+        <section className={styles.detailCard}>
+          <h3 className={styles.detailCardTitle}>
+            <span className={styles.detailIcon} aria-hidden="true">ENT</span>
+            Entities
+          </h3>
+          <div className={styles.detailCardBody}>
+            {(memory.entities || []).length === 0 ? (
+              <p className={styles.detailMsg}>No entities extracted.</p>
+            ) : (
+              <div className={styles.detailChips}>
+                {memory.entities.map((e) => (
+                  <span key={e.id} className={styles.detailChip}>
+                    {e.canonical_name}
+                    <span className={styles.detailChipKind}>[{e.kind}]</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
 
-        <MetaSection
-          title="Extraction"
-          entries={[
-            ["Summary", extraction.summary || memory.summary || "Not available"],
-            [
-              "Types",
-              (extraction.types || [])
-                .map((t) => `${t.type} ${formatPercent(t.weight)}`)
-                .join(", ") || "Not available",
-            ],
-            ["Salience", formatPercent(extraction.salience)],
-            ["Model", meta.model || "Not available"],
-            [
-              "Schema",
-              meta.schema_version != null
-                ? String(meta.schema_version)
-                : "Not available",
-            ],
-          ]}
-        />
+        {/* Relationships */}
+        <section className={styles.detailCard}>
+          <h3 className={styles.detailCardTitle}>
+            <span className={styles.detailIcon} aria-hidden="true">REL</span>
+            Relationships
+          </h3>
+          <div className={styles.detailCardBody}>
+            {(memory.relationships || []).length === 0 ? (
+              <p className={styles.detailMsg}>No relationships found.</p>
+            ) : (
+              <ul className={styles.detailRelList}>
+                {memory.relationships.map((r) => {
+                  const src = r.source_name || r.source?.canonical_name;
+                  const tgt = r.target_name || r.target?.canonical_name;
+                  return (
+                    <li key={r.id}>
+                      {src} <span className={styles.detailPredicate}>{r.predicate}</span> {tgt}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </section>
+
+        {/* Related Memories */}
+        <section className={styles.detailCard}>
+          <h3 className={styles.detailCardTitle}>
+            <span className={styles.detailIcon} aria-hidden="true">LNK</span>
+            Related Memories
+          </h3>
+          <div className={styles.detailCardBody}>
+            {related?.loading && (
+              <p className={styles.detailMsg}>Loading related memories…</p>
+            )}
+            {!related?.loading && relatedLinks.length === 0 && (
+              <p className={styles.detailMsg}>No related memories found.</p>
+            )}
+            {relatedLinks.map((link) => (
+              <article key={link.memory.id} className={styles.relatedCard}>
+                <div className={styles.relatedHeader}>
+                  <span className={styles.relatedTitle}>
+                    {link.memory.summary || link.memory.title || link.memory.raw_text}
+                  </span>
+                  <span className={styles.relatedScore}>
+                    {Math.round(link.score * 100)}% Linked
+                  </span>
+                </div>
+                <div className={styles.relatedTags}>
+                  {link.reasons.slice(0, 4).map((reason, i) => (
+                    <span key={i} className={styles.relatedTag}>{reason}</span>
+                  ))}
+                </div>
+                <div className={styles.relatedMeta}>
+                  {link.semanticSimilarity != null && (
+                    <span>{Math.round(link.semanticSimilarity * 100)}% Semantic Similarity</span>
+                  )}
+                  <span>·</span>
+                  <span>{link.memory.source === "mcp" ? "Agent Memory" : "User Memory"}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        {/* Brain regions (compact) */}
+        {(memory.regions || []).length > 0 && (
+          <section className={styles.detailCard}>
+            <h3 className={styles.detailCardTitle}>
+              <span className={styles.detailIcon} aria-hidden="true">BRN</span>
+              Brain Regions
+            </h3>
+            <div className={styles.detailCardBody}>
+              <div className={styles.detailChips}>
+                {memory.regions.map((r) => (
+                  <span key={r.region} className={styles.detailChip}>
+                    {humanize(r.region)}
+                    <span className={styles.detailChipKind}>{formatPercent(r.weight)}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
       </div>
     );
   }

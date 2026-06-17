@@ -1,4 +1,7 @@
-import { NavLink, Outlet, Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, Link, useLocation } from "react-router-dom";
+import { motion } from "framer-motion";
+import { staggerContainer, fadeUp } from "../lib/motion";
 import styles from "./Layout.module.css";
 
 const NAV = [
@@ -11,29 +14,48 @@ const NAV = [
 ];
 
 export default function Layout() {
+  const [scrolled, setScrolled] = useState(false);
+  const location = useLocation();
+  const isAtlas = location.pathname === "/atlas";
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
     <div className={styles.shell}>
-      <header className={styles.bar}>
-        <Link to="/" className={styles.brand}>
-          <span className={styles.mark} aria-hidden="true">◍</span>
-          <span className={styles.word}>Neurogram</span>
-        </Link>
+      <motion.header
+        className={`${styles.bar} ${scrolled ? styles.barScrolled : ""}`}
+        initial="hidden"
+        animate="show"
+        variants={staggerContainer}
+      >
+        <motion.div variants={fadeUp}>
+          <Link to="/" className={styles.brand}>
+            <span className={styles.mark} aria-hidden="true">◍</span>
+            <span className={styles.word}>Atlas</span>
+          </Link>
+        </motion.div>
         <nav className={styles.nav} aria-label="Primary">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              reloadDocument={item.reload}
-              className={({ isActive }) =>
-                isActive ? `${styles.link} ${styles.linkActive}` : styles.link
-              }
-            >
-              {item.label}
-            </NavLink>
+          {NAV.map((item, i) => (
+            <motion.div key={item.to} variants={fadeUp} custom={i}>
+              <NavLink
+                to={item.to}
+                reloadDocument={item.reload}
+                className={({ isActive }) =>
+                  isActive ? `${styles.link} ${styles.linkActive}` : styles.link
+                }
+              >
+                {item.label}
+              </NavLink>
+            </motion.div>
           ))}
         </nav>
-      </header>
-      <main className={styles.main}>
+      </motion.header>
+      <main className={`${styles.main} ${isAtlas ? styles.mainAtlas : ""}`}>
         <Outlet />
       </main>
     </div>

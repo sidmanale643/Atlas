@@ -103,4 +103,23 @@ export const api = {
     }),
 
   graph: () => request<GraphData>("/api/graph"),
+
+  getMemoryLinks: (
+    id: string,
+    params: { limit?: number; scoreThreshold?: number } = {},
+  ) =>
+    request<{
+      memoryId: string;
+      links: {
+        memory: Memory;
+        score: number;
+        reasons: string[];
+        sharedEntities: { id?: number; canonical_name: string; kind: string }[];
+        sharedRelationships: { subject: string; predicate: string; object: string }[];
+        semanticSimilarity: number | null;
+        bm25Score: number | null;
+      }[];
+      semanticAvailable: boolean;
+      bm25Available: boolean;
+    }>(`/api/memories/${encodeURIComponent(id)}/links${qs(params)}`),
 };

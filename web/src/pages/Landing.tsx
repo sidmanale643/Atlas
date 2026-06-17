@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { motion } from "framer-motion";
+import { staggerContainer, fadeUp } from "../lib/motion";
+import InteractiveArchitecture from "../components/InteractiveArchitecture";
+import NeuralCanvas from "../components/NeuralCanvas";
+import EegWaveform from "../components/EegWaveform";
 import styles from "./Landing.module.css";
 
 /** Inline style carrying a CSS custom property (e.g. --i, --w). */
@@ -9,10 +14,10 @@ const cssVars = (vars: Record<string, string>): CSSProperties =>
 /* ------------------------------------------------------------------ content */
 
 const HERO_METRICS: ReadonlyArray<{ figure: string; label: string }> = [
-  { figure: "11", label: "cortical regions mapped" },
-  { figure: "2", label: "hippocampi · L verbal / R spatial" },
-  { figure: "9", label: "memory tools over MCP" },
-  { figure: "384", label: "dimension semantic vectors" },
+  { figure: "11", label: "facets extracted per moment" },
+  { figure: "2", label: "indexes for instant recall" },
+  { figure: "9", label: "tools to read & write memory" },
+  { figure: "18", label: "endpoints to read & write memory" },
 ];
 
 /* Decorative, illustrative extraction trace — not a live call. */
@@ -28,8 +33,6 @@ const EXTRACT_REGIONS: ReadonlyArray<{ region: string; weight: number }> = [
   { region: "Temporal cortex", weight: 0.28 },
   { region: "Prefrontal cortex", weight: 0.16 },
 ];
-
-
 
 const MCP_TOOLS: ReadonlyArray<{ name: string; note: string }> = [
   { name: "add_memory", note: "write a moment" },
@@ -68,27 +71,26 @@ const PRINCIPLES: ReadonlyArray<{ index: string; term: string; body: string }> =
 
 const FAQS: ReadonlyArray<{ q: string; a: string }> = [
   {
-    q: "Where do my memories live?",
-    a: "In a local SQLite database on the machine you run Neurogram on. Embeddings are indexed to a Qdrant instance you control — nothing leaves for anywhere you haven't configured.",
+    q: "Where do my memories actually live?",
+    a: "On your machine. SQLite holds the graph (the bones); a Qdrant instance you point at holds the embeddings (the smell). Nothing phones home unless you wire it to.",
   },
   {
     q: "Does it need an LLM?",
     a: "Extraction — turning a sentence into entities, relationships and regions — calls a configured LLM. Everything you've already captured stays browsable without it.",
   },
   {
-    q: "What powers “search by meaning”?",
-    a: "Sentence-Transformers embeddings (MiniLM, 384 dimensions) stored in Qdrant and matched by cosine similarity — so “coffee with a friend” can surface “espresso with Maya.”",
+    q: "How is this different from ChatGPT's memory?",
+    a: "ChatGPT keeps a short, opaque summary it manages for you. Atlas keeps the full record — every entity, relationship and region — under your control, queryable by meaning, by association or by name, and shareable with any MCP-capable assistant.",
   },
   {
-    q: "Can my AI assistant use it directly?",
-    a: "Yes — through the Model Context Protocol server. Any MCP client can write and recall memories with the nine tools listed above.",
+    q: "What do I actually need to run it?",
+    a: "A local Node server, a SQLite file and a Qdrant instance you point at — all of which you keep. Bring your own LLM key for the extraction step. No cloud account, no telemetry.",
   },
   {
     q: "Is the neuroscience literal?",
     a: "It's a principled model, not a clinical scan. Region activations follow established memory-systems research, but they remain an interpretive map — built to make structure visible, not to diagnose.",
   },
 ];
-
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
 
 /* ------------------------------------------------------------------ wordmark */
@@ -102,7 +104,7 @@ function Wordmark() {
         <circle cx="12" cy="20" r="1.5" fill="currentColor" />
         <path d="M19.5 12 L12 20" stroke="currentColor" strokeWidth="0.8" opacity="0.6" />
       </svg>
-      <span>Neurogram</span>
+      <span>Atlas</span>
     </a>
   );
 }
@@ -129,6 +131,7 @@ function Oscilloscope() {
 export default function Landing() {
   const rootRef = useRef<HTMLDivElement>(null);
   const [extracted, setExtracted] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
   // Reveal the extraction trace once it scrolls into view.
   const labRef = useRef<HTMLDivElement>(null);
@@ -154,26 +157,41 @@ export default function Landing() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   return (
     <div className={styles.page} ref={rootRef}>
       {/* ---- top bar ---- */}
-      <header className={styles.topbar}>
-        <Wordmark />
+      <motion.header
+        className={`${styles.topbar} ${scrolled ? styles.topbarScrolled : ""}`}
+        initial="hidden"
+        animate="show"
+        variants={staggerContainer}
+      >
+        <motion.div variants={fadeUp}>
+          <Wordmark />
+        </motion.div>
         <nav className={styles.topnav} aria-label="Primary">
-          <a href="#extraction">Extraction</a>
-          <a href="#architecture">Architecture</a>
-          <a href="#mcp">Connect</a>
-          <a href="#science">Science</a>
-          <a className={`nrg-btn ${styles.barCta}`} href="/atlas">
+          <motion.a href="#extraction" variants={fadeUp}>Extraction</motion.a>
+          <motion.a href="#architecture" variants={fadeUp}>Architecture</motion.a>
+          <motion.a href="#mcp" variants={fadeUp}>Connect</motion.a>
+          <motion.a href="#science" variants={fadeUp}>Science</motion.a>
+          <motion.a className={`nrg-btn ${styles.barCta}`} href="/atlas" variants={fadeUp}>
             Open the atlas
-          </a>
+          </motion.a>
         </nav>
-      </header>
+      </motion.header>
 
       <main>
         {/* ============================================================ HERO */}
         <section className={styles.hero}>
           <div className={styles.heroGrid} aria-hidden="true" />
+          <NeuralCanvas />
           <div className={styles.heroInner}>
             <p className={`${styles.heroCoord} ${styles.reveal}`}>
               <span className="label">atlas · build 2026.06</span>
@@ -184,7 +202,7 @@ export default function Landing() {
               <em>wire&nbsp;together.</em>
             </h1>
             <p className={`${styles.heroSub} ${styles.reveal}`}>
-              Add a moment. Neurogram breaks it into people, places, time and
+              Add a moment. Atlas breaks it into people, places, time and
               activity — places it anatomically across the cortex — then draws the
               associations that make it retrievable. A brain, not a notebook.
             </p>
@@ -206,6 +224,7 @@ export default function Landing() {
               ))}
             </dl>
           </div>
+          <EegWaveform />
           <aside className={styles.marginNote} aria-hidden="true">
             fig. 1 — a single moment, decomposed and re-wired
           </aside>
@@ -215,7 +234,7 @@ export default function Landing() {
         <section className={styles.section} id="extraction">
           <div className={styles.sectionHead}>
             <span className="rule-label">extraction lab</span>
-            <h2>From a sentence to a synapse.</h2>
+            <h2>From a memory to a synapse.</h2>
             <p>
               Natural language is decoded under a locked schema into entities,
               relationship triples and a weighted cortical activation map — the
@@ -302,117 +321,7 @@ export default function Landing() {
             </p>
           </div>
 
-          <div className={styles.archChart}>
-            <svg
-              viewBox="0 0 960 520"
-              className={styles.archSvg}
-              aria-label="Architecture diagram: capture flow splits to two stores, three recall paths converge back"
-              role="img"
-            >
-              {/* ---- row 1: capture pipeline ---- */}
-              <text x="0" y="18" className={styles.archLabel}>CAPTURE</text>
-
-              <rect x="0" y="30" width="150" height="48" rx="4" className={styles.archNode} />
-              <text x="75" y="50" textAnchor="middle" className={styles.archNodeTitle}>Natural</text>
-              <text x="75" y="66" textAnchor="middle" className={styles.archNodeTitle}>language</text>
-
-              <line x1="150" y1="54" x2="190" y2="54" className={styles.archArrow} />
-              <polygon points="186,49 196,54 186,59" className={styles.archArrowHead} />
-
-              <rect x="196" y="30" width="150" height="48" rx="4" className={styles.archNode} />
-              <text x="271" y="50" textAnchor="middle" className={styles.archNodeTitle}>Schema-locked</text>
-              <text x="271" y="66" textAnchor="middle" className={styles.archNodeTitle}>extraction</text>
-
-              <line x1="346" y1="54" x2="386" y2="54" className={styles.archArrow} />
-              <polygon points="382,49 392,54 382,59" className={styles.archArrowHead} />
-
-              <rect x="392" y="30" width="150" height="48" rx="4" className={styles.archNode} />
-              <text x="467" y="50" textAnchor="middle" className={styles.archNodeTitle}>Cortical map</text>
-              <text x="467" y="66" textAnchor="middle" className={styles.archNodeSub}>11 ROIs</text>
-
-              <line x1="542" y1="54" x2="582" y2="54" className={styles.archArrow} />
-              <polygon points="578,49 588,54 578,59" className={styles.archArrowHead} />
-
-              <rect x="588" y="30" width="150" height="48" rx="4" className={styles.archNodeHighlight} />
-              <text x="663" y="50" textAnchor="middle" className={styles.archNodeTitleHl}>Embedding</text>
-              <text x="663" y="66" textAnchor="middle" className={styles.archNodeSubHl}>384-d</text>
-
-              {/* ---- split: branching lines from embedding down to stores ---- */}
-              <line x1="663" y1="78" x2="663" y2="108" className={styles.archPipe} />
-              <line x1="663" y1="108" x2="310" y2="108" className={styles.archPipe} />
-              <line x1="663" y1="108" x2="820" y2="108" className={styles.archPipe} />
-              {/* left branch */}
-              <line x1="310" y1="108" x2="310" y2="130" className={styles.archPipe} />
-              <polygon points="305,126 310,136 315,126" className={styles.archPipeHead} />
-              {/* right branch */}
-              <line x1="820" y1="108" x2="820" y2="130" className={styles.archPipe} />
-              <polygon points="815,126 820,136 825,126" className={styles.archPipeHead} />
-
-              {/* ---- row 2: two stores ---- */}
-              <text x="0" y="155" className={styles.archLabel}>ONE WRITE · TWO STORES</text>
-
-              {/* SQLite */}
-              <rect x="155" y="168" width="310" height="80" rx="4" className={styles.archStoreNode} />
-              <text x="175" y="192" className={styles.archStoreName}>SQLite</text>
-              <text x="280" y="192" className={styles.archStoreCode}>engram.db</text>
-              <text x="175" y="214" className={styles.archStoreRole}>Source of truth · the graph</text>
-              <text x="175" y="234" className={styles.archStoreDetail}>memories · extractions · entities · relationships · region activations</text>
-
-              {/* Qdrant */}
-              <rect x="555" y="168" width="310" height="80" rx="4" className={styles.archStoreNode} />
-              <text x="575" y="192" className={styles.archStoreName}>Qdrant</text>
-              <text x="680" y="192" className={styles.archStoreCode}>neurogram_memories</text>
-              <text x="575" y="214" className={styles.archStoreRole}>Semantic index</text>
-              <text x="575" y="234" className={styles.archStoreDetail}>384-dimension vectors · cosine distance</text>
-
-              {/* ---- merge lines from stores to recall row ---- */}
-              <line x1="310" y1="248" x2="310" y2="278" className={styles.archPipe} />
-              <line x1="820" y1="248" x2="820" y2="278" className={styles.archPipe} />
-              <line x1="310" y1="278" x2="820" y2="278" className={styles.archPipe} />
-              {/* three branches down */}
-              <line x1="260" y1="278" x2="260" y2="300" className={styles.archPipe} />
-              <polygon points="255,296 260,306 265,296" className={styles.archPipeHead} />
-              <line x1="540" y1="278" x2="540" y2="300" className={styles.archPipe} />
-              <polygon points="535,296 540,306 545,296" className={styles.archPipeHead} />
-              <line x1="820" y1="278" x2="820" y2="300" className={styles.archPipe} />
-              <polygon points="815,296 820,306 825,296" className={styles.archPipeHead} />
-
-              {/* ---- row 3: three recall paths ---- */}
-              <text x="0" y="325" className={styles.archLabel}>THREE WAYS BACK</text>
-
-              {/* Semantic recall */}
-              <rect x="80" y="340" width="360" height="90" rx="4" className={styles.archRecallNode} />
-              <text x="100" y="364" className={styles.archRecallName}>Semantic recall</text>
-              <text x="100" y="386" className={styles.archRecallDesc}>Embed the query, take the cosine-nearest</text>
-              <text x="100" y="402" className={styles.archRecallDesc}>vectors from Qdrant.</text>
-              <text x="100" y="420" className={styles.archRecallTag}>GET /api/memories/search</text>
-
-              {/* Structural links */}
-              <rect x="460" y="340" width="160" height="90" rx="4" className={styles.archRecallNode} />
-              <text x="480" y="364" className={styles.archRecallName}>Structural</text>
-              <text x="480" y="380" className={styles.archRecallName}>links</text>
-              <text x="480" y="402" className={styles.archRecallDesc}>Memories sharing</text>
-              <text x="480" y="418" className={styles.archRecallDesc}>entities or triples</text>
-
-              {/* Entity & catalog */}
-              <rect x="640" y="340" width="230" height="90" rx="4" className={styles.archRecallNode} />
-              <text x="660" y="364" className={styles.archRecallName}>Entity & catalog</text>
-              <text x="660" y="386" className={styles.archRecallDesc}>Full-text search across names,</text>
-              <text x="660" y="402" className={styles.archRecallDesc}>aliases, summaries and raw text.</text>
-              <text x="660" y="420" className={styles.archRecallTag}>GET /api/catalog</text>
-
-              {/* ---- recall-to-user arrows converging at bottom ---- */}
-              <line x1="260" y1="430" x2="260" y2="460" className={styles.archPipe} />
-              <line x1="540" y1="430" x2="540" y2="460" className={styles.archPipe} />
-              <line x1="820" y1="430" x2="820" y2="460" className={styles.archPipe} />
-              <line x1="260" y1="460" x2="820" y2="460" className={styles.archPipe} />
-              <line x1="540" y1="460" x2="540" y2="480" className={styles.archPipe} />
-              <polygon points="535,476 540,486 545,476" className={styles.archPipeHead} />
-
-              <rect x="440" y="488" width="200" height="30" rx="4" className={styles.archUserNode} />
-              <text x="540" y="508" textAnchor="middle" className={styles.archUserLabel}>You / MCP Client</text>
-            </svg>
-          </div>
+          <InteractiveArchitecture />
 
           <p className={styles.archNote}>
             Related-memories fuses structural + semantic signal —{" "}
@@ -431,7 +340,7 @@ export default function Landing() {
               <span className="rule-label">model context protocol</span>
               <h2>Give your agent a hippocampus.</h2>
               <p>
-                Neurogram ships an MCP server. Point any client — Claude among them
+                Atlas ships an MCP server. Point any client — Claude among them
                 — at it, and your assistant writes to and recalls from the same
                 atlas you explore, persisting memory across every session.
               </p>
@@ -453,7 +362,7 @@ export default function Landing() {
                     <span className={styles.tokK}>"mcpServers"</span>
                     {": {\n"}
                     {"    "}
-                    <span className={styles.tokK}>"neurogram"</span>
+                    <span className={styles.tokK}>"atlas"</span>
                     {": {\n"}
                     {"      "}
                     <span className={styles.tokK}>"command"</span>
@@ -463,7 +372,7 @@ export default function Landing() {
                     {"      "}
                     <span className={styles.tokK}>"args"</span>
                     {": ["}
-                    <span className={styles.tokS}>"neurogram-mcp"</span>
+                    <span className={styles.tokS}>"atlas-mcp"</span>
                     {"]\n"}
                     {"    }\n"}
                     {"  }\n"}

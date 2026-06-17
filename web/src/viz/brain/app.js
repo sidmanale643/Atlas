@@ -16,7 +16,8 @@ import {
 } from "./entity-lens.js";
 import { createMemoryNodeState } from "./memory-placement.js";
 import { filterMemoriesForSearch } from "./memory-search.js";
-import { REGION_ANCHORS } from "./region-anchors.js";
+import { REGION_SHADER_ORDER, getRegionShaderData } from "./brain-regions.js";
+import { REGION_ANCHORS, REGION_COLORS } from "./region-anchors.js";
 import {
   getHippocampalLaterality,
   getRegionContributions,
@@ -55,6 +56,11 @@ const DEEP_BRAIN_REGIONS = new Set([
   "amygdala",
   "basalGanglia",
 ]);
+const REGION_SHADER_COUNT = 12;
+const REGION_SHADER_INDEX = Object.freeze(
+  Object.fromEntries(REGION_SHADER_ORDER.map((name, i) => [name, i])),
+);
+let brainHighlightMaterial = null;
 const REGION_MARKER_SHAPES = Object.freeze({
   prefrontal: {
     scale: [0.72, 0.38, 0.28],
@@ -132,7 +138,6 @@ let extracting = false;
 let regionMarkers = new Map();
 let regionMarkerHitTargets = [];
 let regionLabelButtons = new Map();
-let hasActiveRegionMarkers = false;
 let memoryNodeState = new Map();
 let memoryNodeGroup = null;
 let memoryNodes = [];
@@ -223,7 +228,10 @@ clearButton.addEventListener("click", async () => {
   if (!shouldClear) return;
 
   try {
-    await fetch("/api/memories", { method: "DELETE" });
+    await Promise.all([
+      fetch("/api/memories", { method: "DELETE" }),
+      fetch("/api/entities", { method: "DELETE" }),
+    ]);
   } catch (err) {
     console.error("Failed to clear:", err);
   }
@@ -766,8 +774,7 @@ function getActiveMemoryId() {
 
 function getFocusedRegion() {
   if (entityLens) return null;
-  if (hoveredRegion) return hoveredRegion;
-  return getActiveMemoryId() === selectedMemoryId ? selectedRegion : null;
+  return hoveredRegion ?? null;
 }
 
 function setHoveredRegion(region) {
@@ -978,10 +985,9 @@ function renderDetail(sourceNode) {
   }
 
   const memory = memories.find((item) => item.id === selectedMemoryId);
+  detail.replaceChildren();
 
   if (!memory) {
-    detail.innerHTML =
-      '<span class="detail-index">SELECT A MEMORY</span><p>Its participating brain regions will appear as activation fields and paths.</p>';
     return;
   }
 
@@ -990,21 +996,29 @@ function renderDetail(sourceNode) {
       ? `${sourceNode.type.toUpperCase()} / ${sourceNode.label}`
       : "MEMORY CORE";
 
-  detail.replaceChildren();
-  const breadcrumb = renderBreadcrumb();
-  if (breadcrumb) detail.append(breadcrumb);
+  const header = document.createElement("div");
+  header.className = "detail-header";
   const index = document.createElement("span");
   index.className = "detail-index";
   index.textContent = sourceLabel;
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "detail-close";
+  closeBtn.setAttribute("aria-label", "Close detail panel");
+  closeBtn.textContent = "\u2715";
+  closeBtn.addEventListener("click", clearSelection);
+  header.append(index, closeBtn);
+  detail.append(header);
+
   const copy = document.createElement("div");
   copy.className = "detail-copy";
   copy.append(createDetailLabel("RAW MEMORY"));
   const text = document.createElement("p");
   text.textContent = memory.text;
   copy.append(text);
-  const regionTable = createRegionRoleTable(memory);
-  detail.append(index, copy);
-  if (regionTable) detail.append(regionTable);
+
+  const sidebar = document.createElement("div");
+  sidebar.className = "detail-sidebar";
 
   if (memory.extraction) {
     const ex = memory.extraction;
@@ -1015,22 +1029,6 @@ function renderDetail(sourceNode) {
       summary.className = "detail-summary";
       summary.textContent = ex.summary;
       copy.append(summary);
-    }
-
-    if (ex.emotions?.length) {
-      const emotions = document.createElement("div");
-      emotions.className = "detail-section";
-      emotions.innerHTML = '<span class="detail-label">EMOTIONS</span>';
-      ex.emotions.forEach((e) => {
-        const chip = document.createElement("span");
-        chip.className = "tag tag-event";
-        chip.textContent = e.label;
-        const confidence = document.createElement("span");
-        confidence.className = "detail-confidence";
-        confidence.textContent = `Extraction confidence ${formatPercent(e.confidence)}`;
-        emotions.append(chip, confidence);
-      });
-      detail.append(emotions);
     }
 
     const storedEntities = memory.entities || [];
@@ -1050,7 +1048,7 @@ function renderDetail(sourceNode) {
           entities.append(chip);
         });
       }
-      detail.append(entities);
+      sidebar.append(entities);
     }
 
     if (ex.relationships?.length) {
@@ -1063,19 +1061,17 @@ function renderDetail(sourceNode) {
         p.textContent = `${r.subject} ${r.predicate} ${r.object}`;
         rels.append(p);
       });
-      detail.append(rels);
-    }
-
-    if (ex.salience != null) {
-      const salience = document.createElement("p");
-      salience.className = "detail-salience";
-      salience.textContent = `Salience: ${ex.salience.toFixed(2)}`;
-      detail.append(salience);
+      sidebar.append(rels);
     }
   }
 
-  renderRelatedMemoryDetail(memory);
+  const body = document.createElement("div");
+  body.className = "detail-body";
+  body.append(copy, sidebar);
+  detail.append(body);
+
   renderRegionExplanation(memory);
+  renderRelatedMemoryDetail(memory);
 }
 
 function renderRelatedMemoryDetail(memory) {
@@ -1268,12 +1264,26 @@ function renderEntityDetail() {
   const breadcrumb = renderBreadcrumb();
   if (breadcrumb) detail.append(breadcrumb);
 
+  const header = document.createElement("div");
+  header.className = "detail-header";
   const index = document.createElement("span");
   index.className = "detail-index";
   index.textContent = "ENTITY LENS";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "detail-close";
+  closeBtn.setAttribute("aria-label", "Close detail panel");
+  closeBtn.textContent = "\u2715";
+  closeBtn.addEventListener("click", clearSelection);
+  header.append(index, closeBtn);
+  detail.append(header);
+
+  const body = document.createElement("div");
+  body.className = "detail-body";
   const copy = document.createElement("div");
   copy.className = "detail-copy entity-copy";
-  detail.append(index, copy);
+  body.append(copy);
+  detail.append(body);
 
   if (entityLens.loading) {
     const loading = document.createElement("p");
@@ -1512,11 +1522,11 @@ function createRegionRoleTable(memory) {
 function renderRegionExplanation(memory) {
   const section = document.createElement("section");
   section.className = "detail-section activation-detail";
+  section.append(createDetailLabel("BRAIN REGIONS"));
 
   const regions = getSortedRegions(memory);
 
   if (!regions.length) {
-    section.append(createDetailLabel("BRAIN REGION ACTIVATION"));
     const empty = document.createElement("p");
     empty.className = "activation-empty";
     empty.textContent =
@@ -1573,7 +1583,7 @@ function renderRegionExplanation(memory) {
     name.append(swatch, label);
 
     const percentage = document.createElement("strong");
-    percentage.textContent = `${formatPercent(weight)} activation`;
+    percentage.textContent = formatPercent(weight);
     heading.append(name, percentage);
 
     const meter = document.createElement("div");
@@ -1959,48 +1969,14 @@ function createRegionMarker(region, definition) {
     return createAnatomicalRegionMarker(region, definition, shape);
   }
 
-  const color = new THREE.Color(definition.color);
   const isDeepRegion = DEEP_BRAIN_REGIONS.has(region);
-  const coreMaterial = new THREE.MeshBasicMaterial({
-    color,
-    transparent: true,
-    opacity: 0,
-    blending: THREE.AdditiveBlending,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const glowMaterial = new THREE.SpriteMaterial({
-    map: createActivationFieldTexture(),
-    color,
-    transparent: true,
-    opacity: 0,
-    blending: THREE.AdditiveBlending,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const ringMaterial = new THREE.SpriteMaterial({
-    map: createActivationRingTexture(),
-    color,
-    transparent: true,
-    opacity: 0,
-    blending: THREE.NormalBlending,
-    depthTest: false,
-    depthWrite: false,
-  });
   const marker = new THREE.Group();
-  const core = new THREE.Mesh(
-    new THREE.SphereGeometry(0.2, 24, 16),
-    coreMaterial,
+  const hitTarget = new THREE.Mesh(
+    new THREE.SphereGeometry(0.2, 12, 8),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
   );
-  core.userData.region = region;
-  core.userData.isRegionMarker = true;
-  const glow = new THREE.Sprite(glowMaterial);
-  glow.scale.setScalar(isDeepRegion ? 1.45 : 1.8);
-  const ring = new THREE.Sprite(ringMaterial);
-  ring.scale.setScalar(isDeepRegion ? 0.72 : 0.92);
-  core.renderOrder = 6;
-  glow.renderOrder = 4;
-  ring.renderOrder = 5;
+  hitTarget.userData.region = region;
+  hitTarget.userData.isRegionMarker = true;
 
   marker.name = `region-marker:${region}`;
   marker.visible = false;
@@ -2010,74 +1986,30 @@ function createRegionMarker(region, definition) {
     isDeepRegion,
     markerScale: definition.markerScale,
     weight: 0,
-    coreMaterial,
-    glowMaterial,
-    ringMaterial,
-    hitTargets: [core],
+    hitTargets: [hitTarget],
   };
-  marker.add(glow, ring, core);
+  marker.add(hitTarget);
   return marker;
 }
 
 function createAnatomicalRegionMarker(region, definition, shape) {
-  const color = new THREE.Color(definition.color);
-  const coreMaterial = new THREE.MeshBasicMaterial({
-    color,
-    transparent: true,
-    opacity: 0,
-    blending: THREE.AdditiveBlending,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const glowMaterial = new THREE.MeshBasicMaterial({
-    color,
-    transparent: true,
-    opacity: 0,
-    blending: THREE.AdditiveBlending,
-    depthTest: false,
-    depthWrite: false,
-    side: THREE.BackSide,
-  });
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color,
-    transparent: true,
-    opacity: 0,
-    blending: THREE.NormalBlending,
-    depthTest: false,
-    depthWrite: false,
-    wireframe: true,
-  });
   const hitMaterial = new THREE.MeshBasicMaterial({
     transparent: true,
     opacity: 0,
     depthWrite: false,
   });
   const marker = new THREE.Group();
-  const geometry = new THREE.SphereGeometry(1, 48, 24);
-  const glowGeometry = geometry.clone();
-  const ringGeometry = geometry.clone();
-  const hitGeometry = geometry.clone();
+  const hitTarget = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 12, 8),
+    hitMaterial,
+  );
 
-  const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-  const shell = new THREE.Mesh(ringGeometry, ringMaterial);
-  const core = new THREE.Mesh(geometry, coreMaterial);
-  const hitTarget = new THREE.Mesh(hitGeometry, hitMaterial);
-
-  [glow, shell, core, hitTarget].forEach((mesh) => {
-    mesh.scale.set(...shape.scale);
-    mesh.rotation.set(...shape.rotation);
-  });
-  glow.scale.multiplyScalar(1.24);
-  shell.scale.multiplyScalar(1.04);
+  hitTarget.scale.set(...shape.scale);
+  hitTarget.rotation.set(...shape.rotation);
   hitTarget.scale.multiplyScalar(1.12);
 
-  core.userData.region = region;
-  core.userData.isRegionMarker = true;
   hitTarget.userData.region = region;
   hitTarget.userData.isRegionMarker = true;
-  core.renderOrder = 6;
-  shell.renderOrder = 5;
-  glow.renderOrder = 4;
 
   marker.name = `region-marker:${region}`;
   marker.visible = false;
@@ -2088,22 +2020,13 @@ function createAnatomicalRegionMarker(region, definition, shape) {
     isAnatomicalShape: true,
     markerScale: definition.markerScale,
     weight: 0,
-    coreMaterial,
-    glowMaterial,
-    ringMaterial,
-    opacityScale: {
-      core: 0.86,
-      glow: 0.3,
-      ring: 0.42,
-    },
     hitTargets: [hitTarget],
   };
-  marker.add(glow, shell, core, hitTarget);
+  marker.add(hitTarget);
   return marker;
 }
 
 function createHippocampusMarker(definition) {
-  const color = new THREE.Color(definition.color);
   const hitMaterial = new THREE.MeshBasicMaterial({
     transparent: true,
     opacity: 0,
@@ -2111,89 +2034,36 @@ function createHippocampusMarker(definition) {
   });
   const marker = new THREE.Group();
   const hitTargets = [];
-  const hemisphereMaterials = {};
 
   [
     ["left", -1],
     ["right", 1],
   ].forEach(([hemisphere, side]) => {
-    const materials = createHippocampusMaterials(color);
     const curve = createHippocampusCurve(side, definition.position);
-    const glow = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 64, 0.25, 12, false),
-      materials.glowMaterial,
-    );
-    const shell = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 64, 0.17, 12, false),
-      materials.ringMaterial,
-    );
-    const core = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 64, 0.115, 12, false),
-      materials.coreMaterial,
-    );
     const hitTarget = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 32, 0.25, 8, false),
+      new THREE.TubeGeometry(curve, 16, 0.25, 6, false),
       hitMaterial,
     );
 
-    core.renderOrder = 6;
-    shell.renderOrder = 5;
-    glow.renderOrder = 4;
     hitTarget.userData.region = "hippocampus";
     hitTarget.userData.hemisphere = hemisphere;
     hitTarget.userData.isRegionMarker = true;
-    marker.add(glow, shell, core, hitTarget);
+    marker.add(hitTarget);
     hitTargets.push(hitTarget);
-    hemisphereMaterials[hemisphere] = materials;
   });
 
   marker.name = "region-marker:hippocampus";
   marker.visible = false;
+  marker.scale.setScalar(1);
   marker.userData = {
     region: "hippocampus",
     isDeepRegion: true,
     isAnatomicalShape: true,
     markerScale: 1,
     weight: 0,
-    hemisphereMaterials,
-    opacityScale: {
-      core: 0.92,
-      glow: 0.27,
-      ring: 0.34,
-    },
     hitTargets,
   };
   return marker;
-}
-
-function createHippocampusMaterials(color) {
-  return {
-    coreMaterial: new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.AdditiveBlending,
-      depthTest: false,
-      depthWrite: false,
-    }),
-    glowMaterial: new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.AdditiveBlending,
-      depthTest: false,
-      depthWrite: false,
-    }),
-    ringMaterial: new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.NormalBlending,
-      depthTest: false,
-      depthWrite: false,
-      side: THREE.BackSide,
-    }),
-  };
 }
 
 function createHippocampusCurve(side, anchorPosition) {
@@ -2218,43 +2088,6 @@ function createHippocampusCurve(side, anchorPosition) {
   return new THREE.CatmullRomCurve3(points, false, "centripetal");
 }
 
-function createActivationFieldTexture() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 128;
-  const context = canvas.getContext("2d");
-  const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
-  gradient.addColorStop(0, "rgba(255, 255, 255, 0.9)");
-  gradient.addColorStop(0.18, "rgba(255, 255, 255, 0.55)");
-  gradient.addColorStop(0.5, "rgba(255, 255, 255, 0.16)");
-  gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  return new THREE.CanvasTexture(canvas);
-}
-
-function createActivationRingTexture() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 128;
-  const context = canvas.getContext("2d");
-
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.strokeStyle = "rgba(255, 255, 255, 0.92)";
-  context.lineWidth = 4;
-  context.beginPath();
-  context.arc(64, 64, 47, 0, Math.PI * 2);
-  context.stroke();
-
-  context.strokeStyle = "rgba(255, 255, 255, 0.28)";
-  context.lineWidth = 10;
-  context.beginPath();
-  context.arc(64, 64, 47, 0, Math.PI * 2);
-  context.stroke();
-
-  return new THREE.CanvasTexture(canvas);
-}
-
 function updateRegionMarkers() {
   regionMarkers.forEach((marker) => setRegionMarkerWeight(marker, 0));
   const showHippocampusIntro =
@@ -2264,19 +2097,16 @@ function updateRegionMarkers() {
   if (showHippocampusIntro) {
     const hippocampusMarker = regionMarkers.get("hippocampus");
     if (hippocampusMarker) setRegionMarkerWeight(hippocampusMarker, 0.28);
-    hasActiveRegionMarkers = Boolean(hippocampusMarker);
     return;
   }
 
   if (entityLens) {
-    hasActiveRegionMarkers = false;
     return;
   }
 
   const activeMemoryId = getActiveMemoryId();
   const memory = memories.find((item) => item.id === activeMemoryId);
   if (!memory) {
-    hasActiveRegionMarkers = false;
     return;
   }
 
@@ -2291,9 +2121,6 @@ function updateRegionMarkers() {
       );
     }
   });
-  hasActiveRegionMarkers = memory.regions.some(
-    ({ region, weight }) => regionMarkers.has(region) && weight > 0,
-  );
 }
 
 function setRegionMarkerWeight(
@@ -2303,118 +2130,222 @@ function setRegionMarkerWeight(
   hemispheres = null,
 ) {
   const weight = THREE.MathUtils.clamp(Number(value) || 0, 0, 1);
-  const {
-    coreMaterial,
-    glowMaterial,
-    hemisphereMaterials,
-    opacityScale = {},
-    ringMaterial,
-  } = marker.userData;
   const hasFocusedRegion = Boolean(getFocusedRegion());
   const emphasis = hasFocusedRegion ? (focused ? 1.2 : 0.74) : 1;
 
   marker.userData.weight = weight;
   marker.userData.focused = focused;
+  marker.userData.emphasis = emphasis;
   marker.visible = weight > 0;
   marker.scale.setScalar(getRegionMarkerScale(marker));
-  if (hemisphereMaterials) {
-    const hemisphereWeights = hemispheres || {
-      left: weight / 2,
-      right: weight / 2,
-    };
-    marker.userData.hemispheres = hemisphereWeights;
-    Object.entries(hemisphereMaterials).forEach(([hemisphere, materials]) => {
-      setRegionMaterialOpacity(
-        materials,
-        hemisphereWeights[hemisphere],
-        emphasis,
-        opacityScale,
-      );
-    });
-    return;
+
+  if (hemispheres) {
+    marker.userData.hemispheres = hemispheres;
   }
 
-  setRegionMaterialOpacity(
-    { coreMaterial, glowMaterial, ringMaterial },
-    weight,
-    emphasis,
-    opacityScale,
-  );
-}
-
-function setRegionMaterialOpacity(
-  { coreMaterial, glowMaterial, ringMaterial },
-  value,
-  emphasis,
-  opacityScale,
-) {
-  const weight = THREE.MathUtils.clamp(Number(value) || 0, 0, 1);
-  const strength = Math.sqrt(weight);
-
-  coreMaterial.opacity = weight > 0
-    ? Math.min(
-        (0.2 + strength * 0.48) * emphasis * (opacityScale.core ?? 1),
-        1,
-      )
-    : 0;
-  glowMaterial.opacity = weight > 0
-    ? Math.min(
-        (0.26 + strength * 0.58) * emphasis * (opacityScale.glow ?? 1),
-        1,
-      )
-    : 0;
-  ringMaterial.opacity = weight > 0
-    ? Math.min(
-        (0.34 + strength * 0.56) * emphasis * (opacityScale.ring ?? 1),
-        1,
-      )
-    : 0;
+  const region = marker.userData.region;
+  if (region === "hippocampus") {
+    const leftWeight = hemispheres ? hemispheres.left ?? weight / 2 : weight / 2;
+    const rightWeight = hemispheres ? hemispheres.right ?? weight / 2 : weight / 2;
+    const leftIdx = REGION_SHADER_INDEX["hippocampusLeft"];
+    const rightIdx = REGION_SHADER_INDEX["hippocampusRight"];
+    if (leftIdx != null) setBrainRegionShaderWeight(leftIdx, leftWeight, emphasis);
+    if (rightIdx != null) setBrainRegionShaderWeight(rightIdx, rightWeight, emphasis);
+  } else {
+    const regionIndex = REGION_SHADER_INDEX[region];
+    if (regionIndex != null) {
+      setBrainRegionShaderWeight(regionIndex, weight, emphasis);
+    }
+  }
 }
 
 function getRegionMarkerScale(marker, pulse = 1) {
-  const {
-    focused,
-    isAnatomicalShape,
-    isDeepRegion,
-    markerScale,
-    weight,
-  } = marker.userData;
-  if (isAnatomicalShape) {
-    return markerScale * (1 + (pulse - 1) * 0.2);
-  }
-
+  const { isDeepRegion, markerScale, weight } = marker.userData;
   const strength = Math.sqrt(THREE.MathUtils.clamp(weight, 0, 1));
-
   return (
     markerScale *
     (isDeepRegion ? 1.08 : 1) *
     (0.94 + strength * 0.5) *
-    (focused ? 1.1 : 1) *
     pulse
   );
 }
 
+function createBrainHighlightMaterial() {
+  const material = new THREE.MeshStandardMaterial({
+    color: '#f4eee2',
+    emissive: '#9bb9bc',
+    emissiveIntensity: 0.035,
+    roughness: 0.22,
+    metalness: 0,
+    transparent: true,
+    opacity: 0.35,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+
+  return material;
+}
+
+const REGION_SHADER_GLSL = `
+  precision highp float;
+
+  uniform int uRegionCount;
+  uniform vec3 uRegionCenters[${REGION_SHADER_COUNT}];
+  uniform vec3 uRegionRadii[${REGION_SHADER_COUNT}];
+  uniform vec3 uRegionColors[${REGION_SHADER_COUNT}];
+  uniform float uRegionBilateral[${REGION_SHADER_COUNT}];
+  uniform float uRegionWeights[${REGION_SHADER_COUNT}];
+  uniform float uRegionEmphasis[${REGION_SHADER_COUNT}];
+  uniform float uHighlightStrength;
+  uniform vec3 uModelCenter;
+  uniform vec3 uBaseColor;
+  uniform vec3 uEmissiveColor;
+
+  varying vec3 vObjPosition;
+
+  vec3 computeRegionHighlight(vec3 rawPos) {
+    vec3 totalColor = vec3(0.0);
+    vec3 objPos = rawPos - uModelCenter;
+
+    for (int i = 0; i < ${REGION_SHADER_COUNT}; i++) {
+      if (i >= uRegionCount) break;
+      float w = uRegionWeights[i];
+      if (w <= 0.001) continue;
+
+      vec3 center = uRegionCenters[i];
+      vec3 radius = uRegionRadii[i];
+
+      float px = objPos.x;
+      if (uRegionBilateral[i] > 0.5) {
+        px = abs(px);
+        center = vec3(abs(center.x), center.y, center.z);
+      }
+
+      vec3 d = (vec3(px, objPos.y, objPos.z) - center) / radius;
+      float dist = length(d);
+
+      float highlight = (1.0 - smoothstep(0.3, 1.0, dist)) * w;
+      highlight *= uRegionEmphasis[i];
+
+      totalColor += uRegionColors[i] * highlight;
+    }
+
+    float maxColor = max(totalColor.r, max(totalColor.g, totalColor.b));
+    if (maxColor > 1.0) {
+      totalColor /= maxColor;
+    }
+
+    return totalColor;
+  }
+
+  void main() {
+    vec3 highlight = computeRegionHighlight(vObjPosition);
+    float intensity = uHighlightStrength;
+    float alpha = min(max(highlight.r, max(highlight.g, highlight.b)) * intensity * 1.5, 1.0);
+    vec3 emissive = highlight * uEmissiveColor * intensity;
+    gl_FragColor = vec4(highlight + emissive * 0.3, alpha);
+  }
+`;
+
+const REGION_SHADER_VERTEX_GLSL = `
+  precision highp float;
+  varying vec3 vObjPosition;
+  void main() {
+    vObjPosition = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
 function applyBrainMaterial(model) {
+  brainHighlightMaterial = createBrainHighlightMaterial();
+
+  const bounds = new THREE.Box3().setFromObject(model);
+  const modelCenter = bounds.getCenter(new THREE.Vector3());
+
+  const highlightUniforms = {
+    uRegionCount: { value: REGION_SHADER_COUNT },
+    uRegionCenters: { value: [] },
+    uRegionRadii: { value: [] },
+    uRegionColors: { value: [] },
+    uRegionBilateral: { value: [] },
+    uRegionWeights: { value: new Float32Array(REGION_SHADER_COUNT).fill(0) },
+    uRegionEmphasis: { value: new Float32Array(REGION_SHADER_COUNT).fill(1) },
+    uHighlightStrength: { value: 0.0 },
+    uModelCenter: { value: modelCenter },
+    uBaseColor: { value: new THREE.Color('#f4eee2') },
+    uEmissiveColor: { value: new THREE.Color('#9bb9bc') },
+  };
+
+  const shaderRegions = getRegionShaderData().map((data) => {
+    let regionKey = data.name;
+    if (regionKey === "hippocampusLeft" || regionKey === "hippocampusRight") {
+      regionKey = "hippocampus";
+    }
+    return {
+      center: data.center,
+      radius: data.radius,
+      color: REGION_COLORS[regionKey],
+      bilateral: data.bilateral,
+    };
+  });
+
+  const centers = [];
+  const radii = [];
+  const colors = [];
+  const bilateral = [];
+  for (const r of shaderRegions) {
+    centers.push(new THREE.Vector3(...r.center));
+    radii.push(new THREE.Vector3(...r.radius));
+    colors.push(new THREE.Color(r.color));
+    bilateral.push(r.bilateral ? 1.0 : 0.0);
+  }
+  highlightUniforms.uRegionCenters.value = centers;
+  highlightUniforms.uRegionRadii.value = radii;
+  highlightUniforms.uRegionColors.value = colors;
+  highlightUniforms.uRegionBilateral.value = bilateral;
+
+  const highlightMaterial = new THREE.ShaderMaterial({
+    vertexShader: REGION_SHADER_VERTEX_GLSL,
+    fragmentShader: REGION_SHADER_GLSL,
+    uniforms: highlightUniforms,
+    transparent: true,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+
   model.traverse((child) => {
     if (!child.isMesh) return;
-
-    child.material = new THREE.MeshPhysicalMaterial({
-      color: "#f4eee2",
-      emissive: "#9bb9bc",
-      emissiveIntensity: 0.035,
-      roughness: 0.22,
-      metalness: 0,
-      transmission: 0.32,
-      thickness: 0.65,
-      ior: 1.18,
-      clearcoat: 1,
-      clearcoatRoughness: 0.18,
-      transparent: true,
-      opacity: 0.3,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
+    child.material = brainHighlightMaterial;
+    const highlightClone = new THREE.Mesh(child.geometry, highlightMaterial);
+    highlightClone.renderOrder = 1;
+    child.parent.add(highlightClone);
   });
+
+  brainHighlightMaterial.userData.shader = highlightMaterial;
+  brainHighlightMaterial.userData.regionWeights = highlightUniforms.uRegionWeights.value;
+  brainHighlightMaterial.userData.regionEmphasis = highlightUniforms.uRegionEmphasis.value;
+}
+
+function updateBrainShaderUniforms() {
+  if (!brainHighlightMaterial?.userData.shader) return;
+  const highlightMat = brainHighlightMaterial.userData.shader;
+  if (highlightMat.isShaderMaterial) {
+    highlightMat.uniforms.uRegionCount.value = REGION_SHADER_COUNT;
+    highlightMat.uniforms.uHighlightStrength.value = 1.0;
+  }
+}
+
+function setBrainRegionShaderWeight(regionIndex, weight, emphasis = 1) {
+  if (!brainHighlightMaterial) return;
+  brainHighlightMaterial.userData.regionWeights[regionIndex] = weight;
+  brainHighlightMaterial.userData.regionEmphasis[regionIndex] = emphasis;
+
+  if (brainHighlightMaterial.userData.shader?.uniforms) {
+    brainHighlightMaterial.userData.shader.uniforms.uRegionWeights.value = [...brainHighlightMaterial.userData.regionWeights];
+    brainHighlightMaterial.userData.shader.uniforms.uRegionEmphasis.value = [...brainHighlightMaterial.userData.regionEmphasis];
+  }
 }
 
 function updateActivationConnections() {
@@ -3654,20 +3585,12 @@ function renderBrainModel() {
       if (progress === 1) cameraFocus = null;
     }
     controls.update();
-    if (hasActiveRegionMarkers && !reduceMotion.matches) {
-      const elapsed = performance.now() * 0.004;
-      regionMarkers.forEach((marker) => {
-        const { weight } = marker.userData;
-        if (!weight) return;
-        const pulse = 1 + Math.sin(elapsed) * (0.03 + weight * 0.05);
-        marker.scale.setScalar(getRegionMarkerScale(marker, pulse));
-      });
-    }
     if (!reduceMotion.matches) {
       const elapsed = performance.now() * 0.001;
       animateMemoryNodes(elapsed);
       animateActivationConnections(elapsed);
     }
+    updateBrainShaderUniforms();
     updateRegionLabelPositions(camera);
     renderer.render(scene, camera);
     requestAnimationFrame(animate);

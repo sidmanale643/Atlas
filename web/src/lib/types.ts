@@ -79,6 +79,7 @@ export interface MemoryCatalogItem {
   confidence: number;
   created_at: string;
   entities: Entity[];
+  linked_count: number;
 }
 
 export interface EntityCatalogItem {

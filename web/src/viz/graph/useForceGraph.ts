@@ -5,7 +5,7 @@ import type { GraphData, GraphEdge, GraphNode } from "../../lib/types";
 /* ---------------------------------------------------------------------------
  * useForceGraph — D3 v7 force-directed network of memories + entities.
  *
- * Ported from the legacy public/js/graph.js, recoloured to the Neurogram
+ * Ported from the legacy public/js/graph.js, recoloured to the Atlas
  * phosphor-green palette. Node CATEGORIES are encoded by SHAPE + green
  * brightness/opacity rather than the legacy rainbow per-type colours:
  *

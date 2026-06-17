@@ -399,7 +399,7 @@ export default function Compare() {
   );
 
   useEffect(() => {
-    document.title = "Compare memories · Neurogram";
+    document.title = "Compare memories · Atlas";
   }, []);
 
   useEffect(() => {

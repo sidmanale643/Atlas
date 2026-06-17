@@ -10,22 +10,6 @@ import "./Atlas.css";
  */
 const SCAFFOLD = `
   <section class="atlas-grid">
-    <aside class="composer">
-      <h2 class="atlas-h">Record a memory</h2>
-      <form id="memoryForm">
-        <label for="memoryInput">What happened?</label>
-        <textarea id="memoryInput" rows="5"
-          placeholder="I went to a cafe with Maya yesterday..." required></textarea>
-        <div class="composer-meta">
-          <span>Natural language</span>
-          <span id="characterCount">0 / 180</span>
-        </div>
-        <button class="record-button" type="submit">
-          <span>Encode memory</span><span aria-hidden="true">↗</span>
-        </button>
-      </form>
-    </aside>
-
     <section class="atlas-panel">
       <div class="atlas-heading">
         <h2 class="atlas-h">Association field</h2>
@@ -74,12 +58,25 @@ const SCAFFOLD = `
         <div class="empty-state" id="emptyState"></div>
       </div>
     </section>
+
+    <aside class="composer">
+      <h2 class="atlas-h">Record a memory</h2>
+      <form id="memoryForm">
+        <label for="memoryInput">What happened?</label>
+        <textarea id="memoryInput" rows="5"
+          placeholder="I went to a cafe with Maya yesterday..." required></textarea>
+        <div class="composer-meta">
+          <span>Natural language</span>
+          <span id="characterCount">0 / 180</span>
+        </div>
+        <button class="record-button" type="submit">
+          <span>Encode memory</span>
+        </button>
+      </form>
+    </aside>
   </section>
 
-  <div class="memory-detail" id="memoryDetail" aria-live="polite">
-    <span class="detail-index">Select a memory</span>
-    <p>Its participating brain regions will appear as activation fields and paths.</p>
-  </div>
+  <div class="memory-detail" id="memoryDetail" aria-live="polite"></div>
 
   <section class="memory-log">
     <div class="memory-log-header">
@@ -104,7 +101,7 @@ export default function Atlas() {
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
-    document.title = "Atlas · Neurogram";
+    document.title = "Atlas · Atlas";
     // Boot the protected brain after the scaffold is in the DOM.
     import("../viz/brain/app.js");
 

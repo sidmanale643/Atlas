@@ -17,6 +17,11 @@
   background: rgba(17, 19, 24, 0.82);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.barScrolled {
+  border-bottom-color: var(--line-strong);
+  box-shadow: 0 1px 12px rgba(56, 130, 246, 0.08);
 }
 
 .brand {
@@ -24,11 +29,20 @@
   align-items: baseline;
   gap: 10px;
   color: var(--green-bright);
+  transition: filter 0.2s ease;
+}
+.brand:hover {
+  filter: drop-shadow(0 0 6px rgba(56, 130, 246, 0.35));
 }
 .mark {
   font-size: 16px;
   color: var(--green);
   text-shadow: var(--glow);
+  transition: text-shadow 0.2s ease, transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.brand:hover .mark {
+  text-shadow: 0 0 10px rgba(56, 130, 246, 0.6);
+  transform: rotate(90deg);
 }
 .word {
   font-family: var(--font-serif);
@@ -48,10 +62,15 @@
   text-transform: uppercase;
   letter-spacing: 0.16em;
   color: var(--muted);
-  transition: color 0.16s ease;
+  transition: color 0.16s ease, text-shadow 0.16s ease;
 }
-.link:hover { color: var(--green); }
-.linkActive { color: var(--green-bright); }
+.link:hover {
+  color: var(--green);
+  text-shadow: 0 0 8px rgba(56, 130, 246, 0.3);
+}
+.linkActive {
+  color: var(--green-bright);
+}
 .linkActive::after {
   content: "";
   position: absolute;
@@ -61,6 +80,11 @@
   height: 1px;
   background: var(--green);
   box-shadow: var(--glow);
+  animation: activePulse 2.5s ease-in-out infinite;
+}
+@keyframes activePulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(56, 130, 246, 0.3); }
+  50% { box-shadow: 0 0 10px rgba(56, 130, 246, 0.55); }
 }
 
 .main {
@@ -71,7 +95,22 @@
   padding: clamp(20px, 4vw, 44px) clamp(16px, 4vw, 48px) 80px;
 }
 
+.mainAtlas {
+  max-width: none;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
 @media (max-width: 620px) {
   .bar { height: auto; flex-direction: column; align-items: flex-start; padding: 12px 16px; }
   .nav { flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .linkActive::after {
+    animation: none;
+  }
+  .brand:hover .mark {
+    transform: none;
+  }
 }

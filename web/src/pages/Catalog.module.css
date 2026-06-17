@@ -6,7 +6,8 @@
 .page {
   max-width: var(--maxw);
   margin: 0 auto;
-  padding: 6vh clamp(20px, 4vw, 56px) 96px;
+  padding: 0 clamp(20px, 4vw, 56px) 96px;
+  margin-top: calc(-1 * clamp(20px, 4vw, 44px));
 }
 
 /* ---- header ------------------------------------------------------------- */
@@ -254,6 +255,12 @@
   color: var(--faint);
 }
 
+.linkedCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--green-bright);
+}
+
 /* tags */
 .tagCell {
   display: flex;
@@ -325,15 +332,18 @@
 .detailGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 22px;
+  gap: 16px 22px;
+  align-items: start;
 }
 
 .section {
   min-width: 0;
+  align-self: start;
 }
 .sectionWide {
   min-width: 0;
   grid-column: 1 / -1;
+  align-self: start;
 }
 
 .sectionTitle {
@@ -445,6 +455,223 @@
   overflow-wrap: anywhere;
 }
 
+/* ---- card-based detail layout (matches reference) ------------------------- */
+
+.detailCards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detailCard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+.detailCardTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 20px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--green);
+  border-bottom: 1px solid var(--line);
+}
+
+.detailIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--inset);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--green);
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+
+.detailCardBody {
+  padding: 16px 20px;
+}
+
+.detailField {
+  display: flex;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.detailField:last-child {
+  border-bottom: none;
+}
+
+.detailFieldIcon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  background: var(--inset);
+  border: 1px solid var(--line);
+  font-size: 14px;
+  color: var(--green);
+  font-family: var(--font-mono);
+}
+
+.detailFieldLabel {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.detailFieldValue {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.detailSummaryHighlight {
+  color: var(--green-bright);
+}
+
+.detailFieldMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.detailChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detailChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.detailChipKind {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.detailRelList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.detailRelList li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.detailRelList li:last-child {
+  border-bottom: none;
+}
+
+.detailPredicate {
+  color: var(--green);
+  font-style: italic;
+}
+
+/* ---- related memories ---------------------------------------------------- */
+
+.relatedCard {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.relatedCard:last-child {
+  border-bottom: none;
+}
+
+.relatedHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.relatedTitle {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.35;
+  color: var(--green-bright);
+}
+
+.relatedScore {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+.relatedTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.relatedTag {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.relatedMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
 /* ---- inline states ------------------------------------------------------ */
 
 .state {
@@ -504,5 +731,9 @@
   }
   .detail {
     padding: 20px;
+  }
+  .relatedHeader {
+    flex-direction: column;
+    gap: 4px;
   }
 }
