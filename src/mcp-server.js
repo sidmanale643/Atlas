@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import "dotenv/config";
-import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -21,12 +20,23 @@ import {
   storeMemory,
   updateMemoryGraph,
   updateMemorySummary,
+  createMemorySource,
+  enqueueAnnotationJob,
+  enqueueVectorIndexJob,
+  getAnnotationStatus,
+  getMemorySource,
+  getSourceMemoryLinks,
+  getVectorIndexStatus,
+  linkSourceMemory,
+  updateMemorySourceStatus,
+  withTransaction,
 } from "./db.js";
 import { extractAtomicMemories } from "./llm.js";
 import { getRelatedMemories as deriveRelatedMemories } from "./related-memories.js";
 import { AddMemorySchema } from "./schemas.js";
-import { retrieveExtractionContext } from "./extraction-context.js";
+import { createIngestionService } from "./ingestion-service.js";
 import {
+  assertAtlasModeSupported,
   deleteMemoryVector,
   hybridSearchMemories,
   indexMemoryVector,
@@ -41,12 +51,21 @@ const memoryIdSchema = z
   .describe("Atlas memory ID, for example mem_12ab34cd");
 
 const memoryWriteResultSchema = {
+  sourceId: z.string().uuid(),
+  status: z.literal("completed"),
   memories: z.array(z.object({
     action: z.enum(["created", "updated", "unchanged"]),
     memory: z.object({ id: memoryIdSchema }).passthrough(),
     matchedMemoryId: memoryIdSchema.nullable(),
     confidence: z.number().min(0).max(1),
     reason: z.string().min(1),
+    evidenceSpans: z.array(z.object({
+      start: z.number().int().nonnegative(),
+      end: z.number().int().positive(),
+      text: z.string(),
+    })),
+    annotationStatus: z.enum(["pending", "processing", "completed", "failed"]),
+    indexStatus: z.enum(["pending", "processing", "completed", "failed"]),
   })),
 };
 
@@ -90,6 +109,16 @@ function defaultDependencies() {
     storeMemory,
     updateMemoryGraph,
     updateMemorySummary,
+    createMemorySource,
+    updateMemorySourceStatus,
+    getMemorySource,
+    getSourceMemoryLinks,
+    linkSourceMemory,
+    enqueueAnnotationJob,
+    enqueueVectorIndexJob,
+    getAnnotationStatus,
+    getVectorIndexStatus,
+    withTransaction,
     getModel: async () => {
       const module = await import("./llm-config.js");
       return module.model;
@@ -137,13 +166,15 @@ export function createAtlasMcpServer(overrides = {}) {
       regions: dependencies.getRegionActivations(id),
     };
   };
+  dependencies.serializeMemory = (memory) => getMemoryDetails(memory?.id);
+  dependencies.ingestionService ||= createIngestionService(dependencies);
 
   server.registerTool(
     "add_memory",
     {
       title: "Add memory",
       description:
-        "Save a NEW personal memory to Atlas. The system then either creates, updates, or leaves an equivalent memory unchanged based on similarity. Use this whenever the user states a durable preference, fact, decision, learning, event, relationship detail, instruction, observation, or error worth remembering across sessions. Provide one or more durable memories as conversational text (max 2000 chars) plus a `type`, a short `title` (max 50 chars), an optional confidence in 0-1 (default 0.6), and optional tags. The text is automatically split into atomic memories, each extracted with entities, relationships, brain regions, and embeddings. Returns an array of results with `action: 'created' | 'updated' | 'unchanged'` for each atomic memory. Do NOT use this for ephemeral chit-chat, transient state, secrets, or anything already covered by a recent `search_memories` / `list_memories` result. Requires the configured LLM API key.",
+        "Save durable source text to Atlas. The source is preserved exactly, split into evidence-backed atomic memories, and each atom is created, updated, or left unchanged. Type and title are optional source-level hints. Returns one consistent source-level result. Do not use for ephemeral chat, secrets, or transient state.",
       inputSchema: AddMemorySchema.shape,
       outputSchema: memoryWriteResultSchema,
       annotations: {
@@ -154,105 +185,15 @@ export function createAtlasMcpServer(overrides = {}) {
       },
     },
     async ({ text, type, title, confidence, tags }) => {
-      const date = new Date().toISOString();
-      const metadata = { type, title, confidence, tags };
-
       try {
-        let similarMemories = [];
-        try {
-          similarMemories = await retrieveExtractionContext(text, dependencies);
-        } catch {
-          // Context retrieval is optional enrichment
-        }
-
-        const semanticExtraction = await dependencies.extractAtomicMemories(
+        const metadata = Object.fromEntries(Object.entries({
+          type, title, confidence, tags,
+        }).filter(([, value]) => value !== undefined));
+        return toolResult(await dependencies.ingestionService.ingest({
           text,
-          date,
-          similarMemories,
-        );
-
-        const results = [];
-        for (const atom of semanticExtraction.memories) {
-          const id = `mem_${randomUUID().slice(0, 8)}`;
-          const atomMetadata = {
-            ...metadata,
-            type: metadata.type || dominantType(atom.types),
-            title: metadata.title || atom.summary || atom.text.slice(0, 50),
-          };
-
-          const decision = await decideSmartMemoryWrite({
-            dependencies,
-            getMemoryDetails,
-            text: atom.text,
-            extraction: atom,
-            metadata: atomMetadata,
-          });
-
-          let memory;
-          if (decision.action === "unchanged") {
-            memory = getMemoryDetails(decision.matchedMemoryId);
-          } else if (decision.action === "update") {
-            const replacementText = decision.replacementText?.trim() || atom.text;
-            let replacementExtraction;
-            if (replacementText === atom.text) {
-              replacementExtraction = atom;
-            } else {
-              let replacementContext = [];
-              try {
-                replacementContext = await retrieveExtractionContext(replacementText, dependencies);
-              } catch {
-                // Context retrieval is optional
-              }
-              const replacementResult = await dependencies.extractAtomicMemories(replacementText, date, replacementContext);
-              if (!replacementResult.memories.length) {
-                throw new Error("Replacement text did not produce a valid memory extraction");
-              }
-              replacementExtraction = replacementResult.memories[0];
-            }
-            dependencies.updateMemoryGraph({
-              memoryId: decision.matchedMemoryId,
-              rawText: replacementText,
-              ingestionDate: date,
-              extraction: replacementExtraction,
-              model: await dependencies.getModel(),
-              metadata: atomMetadata,
-            });
-            memory = getMemoryDetails(decision.matchedMemoryId);
-            try {
-              await dependencies.indexMemoryVector(memory);
-            } catch (error) {
-              console.error(
-                `Could not reindex memory ${decision.matchedMemoryId}: ${error.message}`,
-              );
-            }
-          } else {
-            memory = dependencies.storeMemory(
-              id,
-              atom.text,
-              date,
-              atom,
-              await dependencies.getModel(),
-              "mcp",
-              atomMetadata,
-            );
-            try {
-              await dependencies.indexMemoryVector(memory);
-            } catch (error) {
-              console.error(`Could not index memory ${id}: ${error.message}`);
-            }
-          }
-
-          results.push({
-            action: decision.action === "create" ? "created" : decision.action,
-            memory: getMemoryDetails(memory.id),
-            matchedMemoryId:
-              decision.action === "create" ? null : decision.matchedMemoryId,
-            confidence: decision.confidence,
-            reason: decision.reason,
-          });
-        }
-
-        return toolResult({ memories: results });
+          source: "mcp",
+          metadata,
+        }));
       } catch (error) {
         return toolError(`Could not add memory: ${error.message}`);
       }
@@ -501,7 +442,7 @@ export function createAtlasMcpServer(overrides = {}) {
     {
       title: "Delete memory",
       description:
-        "PERMANENTLY delete one Atlas memory, its extraction data, and its Qdrant vector. This is destructive and cannot be undone. Use this ONLY when the user explicitly asks to forget, remove, or delete a specific memory, or when correcting a test/dev record. Confirm with the user first when in doubt. Returns an error if the ID does not exist. To revise the underlying text or facts, prefer `add_memory` (which may return `action: \"updated\"`) so the original memory ID and revision history are preserved.",
+        "PERMANENTLY delete one Atlas memory, its extraction data, and its vector index entry. This is destructive and cannot be undone. Use this ONLY when the user explicitly asks to forget, remove, or delete a specific memory, or when correcting a test/dev record. Confirm with the user first when in doubt. Returns an error if the ID does not exist. To revise the underlying text or facts, prefer `add_memory` (which may return `action: \"updated\"`) so the original memory ID and revision history are preserved.",
       inputSchema: {
         id: z
           .string()
@@ -534,69 +475,8 @@ export function createAtlasMcpServer(overrides = {}) {
   return server;
 }
 
-async function decideSmartMemoryWrite({
-  dependencies,
-  getMemoryDetails,
-  text,
-  extraction,
-  metadata,
-}) {
-  let candidates;
-  try {
-    const hits = await dependencies.searchMemoryVectors(text, { limit: 5 });
-    candidates = hits
-      .map(({ id }) => getMemoryDetails(id))
-      .filter(Boolean);
-  } catch (error) {
-    console.error(`Could not find memory candidates: ${error.message}`);
-    return createDecision("Memory candidate search was unavailable.");
-  }
-
-  if (candidates.length === 0) {
-    return createDecision("No similar stored memory was found.", 1);
-  }
-
-  try {
-    const decision = await dependencies.decideMemoryWrite(
-      {
-        text,
-        summary: extraction.summary,
-        ...metadata,
-      },
-      candidates,
-    );
-    if (decision.action === "create") return decision;
-    const validMatch = candidates.some(
-      ({ id }) => id === decision.matchedMemoryId,
-    );
-    if (!validMatch || decision.confidence < 0.85) {
-      return createDecision("The possible memory match was uncertain.");
-    }
-    return decision;
-  } catch (error) {
-    console.error(`Could not decide memory write action: ${error.message}`);
-    return createDecision("Memory matching was inconclusive.");
-  }
-}
-
-function createDecision(reason, confidence = 0) {
-  return {
-    action: "create",
-    matchedMemoryId: null,
-    confidence,
-    reason,
-    replacementText: "",
-  };
-}
-
-function dominantType(types = []) {
-  return [...types].sort(
-    (left, right) =>
-      right.weight - left.weight || left.type.localeCompare(right.type),
-  )[0]?.type || "semantic";
-}
-
 export async function runAtlasMcpServer() {
+  assertAtlasModeSupported();
   const server = createAtlasMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -9,6 +9,9 @@
     "url": "https://github.com/sidmanale643/Atlas"
   },
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
     "atlas": "./src/cli.js",
     "atlas-mcp": "./src/mcp-server.js"
@@ -21,13 +24,19 @@
     "mcp": "node src/mcp-server.js",
     "cli": "node src/cli.js",
     "qdrant:sync": "node scripts/sync-memory-vectors.js",
+    "worker:cognitive": "node src/run-cognitive-worker.js",
+    "worker:vector": "node src/run-vector-worker.js",
+    "audit": "node src/audit.js",
+    "eval:v3": "node scripts/evaluate-extraction-v3.js",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
+    "@lancedb/lancedb": "^0.30.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@qdrant/js-client-rest": "^1.18.0",
     "@supabase/supabase-js": "^2.108.1",
+    "apache-arrow": "^18.1.0",
     "better-sqlite3": "^12.10.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

@@ -3,8 +3,9 @@ import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 import { pathToFileURL } from "url";
-import { randomUUID } from "crypto";
 import { existsSync } from "fs";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { compareMemories, decideMemoryWrite, extractAtomicMemories, extractMemory } from "./llm.js";
 import { model } from "./llm-config.js";
 import {
@@ -20,7 +21,9 @@ import {
 import { getRelatedMemories as deriveRelatedMemories } from "./related-memories.js";
 import { retrieveExtractionContext } from "./extraction-context.js";
 import createLogger from "./logger.js";
+import { createIngestionService } from "./ingestion-service.js";
 import {
+  assertAtlasModeSupported,
   deleteAllMemoryVectors,
   deleteMemoryVector,
   hybridSearchMemories,
@@ -56,12 +59,36 @@ import {
   deleteAllMemories,
   deleteAllEntities,
   deleteMemory,
+  claimAnnotationJob,
+  completeAnnotationJob,
+  createMemorySource,
+  createSourceRevision,
+  enqueueAnnotationJob,
+  enqueueVectorIndexJob,
+  failAnnotationJob,
+  getAnnotationStatus,
+  getMemorySource,
+  getSourceMemoryLinks,
+  getVectorIndexStatus,
+  linkSourceMemory,
+  recoverAnnotationJobs,
+  retryAnnotationJob,
+  saveCognitiveAnnotation,
+  updateMemoryGraph,
+  updateMemorySourceStatus,
+  withTransaction,
 } from "./db.js";
 
 const log = createLogger("server");
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "public");
 const PORT = process.env.PORT || 3000;
+const zSourceRevision = z.object({
+  text: z.string().min(1).max(2000),
+  author: z.string().trim().min(1).max(200).optional(),
+  reason: z.string().trim().min(1).max(500).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional().default({}),
+}).strict();
 
 // The Vite-built React SPA (npm run build:web) emits here. React Router owns all
 // client routes; the SPA is the only frontend (run the build before starting).
@@ -106,10 +133,26 @@ const defaultDependencies = {
   resolveEntityResolutionSuggestion,
   storeMemory,
   updateMemorySummary,
+  updateMemoryGraph,
+  createMemorySource,
+  createSourceRevision,
+  updateMemorySourceStatus,
+  getMemorySource,
+  getSourceMemoryLinks,
+  linkSourceMemory,
+  enqueueAnnotationJob,
+  enqueueVectorIndexJob,
+  getAnnotationStatus,
+  getVectorIndexStatus,
+  withTransaction,
 };
 
 export function createAtlasApp(overrides = {}) {
   const dependencies = { ...defaultDependencies, ...overrides };
+  dependencies.serializeMemory ||= (memory) => serializeMemory(memory, dependencies, {
+    includeRelationships: true,
+  });
+  dependencies.ingestionService ||= createIngestionService(dependencies);
   const app = express();
 
   dependencies.getDb();
@@ -148,113 +191,19 @@ export function createAtlasApp(overrides = {}) {
     const date = ingestionDate || new Date().toISOString();
 
     try {
-      let similarMemories = [];
-      try {
-        similarMemories = await retrieveExtractionContext(text, dependencies);
-      } catch {
-        // Context retrieval is optional enrichment
-      }
-
-      const semanticExtraction = await dependencies.extractAtomicMemories(
+      const result = await dependencies.ingestionService.ingest({
         text,
-        date,
-        similarMemories,
-      );
-
-      const memories = [];
-      for (const atom of semanticExtraction.memories) {
-        const id = `mem_${randomUUID().slice(0, 8)}`;
-
-        let candidates;
-        try {
-          const hits = await dependencies.searchMemoryVectors(atom.text, { limit: 5 });
-          candidates = hits
-            .map(({ id: hitId }) => dependencies.getMemory(hitId))
-            .filter(Boolean);
-        } catch {
-          candidates = [];
-        }
-
-        let action = "created";
-        let matchedMemoryId = null;
-
-        if (candidates.length > 0) {
-          try {
-            const decision = await dependencies.decideMemoryWrite(
-              { text: atom.text, summary: atom.summary },
-              candidates,
-            );
-            if (decision.action !== "create") {
-              const validMatch = candidates.some(
-                ({ id: cid }) => cid === decision.matchedMemoryId,
-              );
-              if (validMatch && decision.confidence >= 0.85) {
-                action = decision.action === "unchanged" ? "unchanged" : "updated";
-                matchedMemoryId = decision.matchedMemoryId;
-
-                if (action === "updated") {
-                  dependencies.updateMemorySummary(matchedMemoryId, atom.summary);
-                  const existing = dependencies.getMemory(matchedMemoryId);
-                  if (existing) {
-                    await syncVectorIndex(
-                      () => dependencies.indexMemoryVector(existing),
-                      { action: "reindex", id: matchedMemoryId },
-                    );
-                    memories.push(
-                      serializeMemory(existing, dependencies, {
-                        extraction: atom,
-                        includeRelationships: true,
-                      }),
-                    );
-                  }
-                  continue;
-                }
-                // unchanged
-                const existing = dependencies.getMemory(matchedMemoryId);
-                if (existing) {
-                  memories.push(
-                    serializeMemory(existing, dependencies, {
-                      extraction: atom,
-                      includeRelationships: true,
-                    }),
-                  );
-                }
-                continue;
-              }
-            }
-          } catch {
-            // Fall through to create
-          }
-        }
-
-        const memory = dependencies.storeMemory(
-          id,
-          atom.text,
-          date,
-          atom,
-          dependencies.model,
-          "ui",
-        );
-        await syncVectorIndex(
-          () => dependencies.indexMemoryVector(memory),
-          { action: "index", id },
-        );
-        memories.push(
-          serializeMemory(memory, dependencies, {
-            extraction: atom,
-            includeRelationships: true,
-          }),
-        );
-      }
-
-      log.info("memories stored", {
-        count: memories.length,
+        ingestionDate: date,
+        source: "ui",
       });
-      res.status(201).json({ memories });
+      log.info("source ingested", { sourceId: result.sourceId, count: result.memories.length });
+      res.status(201).json(result);
     } catch (error) {
-      log.error("extraction failed", { error: error.message });
+      log.error("ingestion failed", { sourceId: error.sourceId, error: error.message });
       res.status(502).json({
-        error: "Extraction failed",
+        error: "Ingestion failed",
+        code: error.code || "INGESTION_FAILED",
+        sourceId: error.sourceId,
         detail: error.message,
       });
     }
@@ -266,6 +215,40 @@ export function createAtlasApp(overrides = {}) {
     const source = req.query.source || undefined;
     const rows = dependencies.getMemories({ limit, offset, source });
     res.json(rows.map((row) => serializeMemory(row, dependencies)));
+  });
+
+  app.get("/api/sources/:id", (req, res) => {
+    const source = dependencies.getMemorySource(req.params.id, {
+      includeRevisions: true,
+    });
+    if (!source) return res.status(404).json({ error: "Source not found" });
+    res.json({ ...source, links: dependencies.getSourceMemoryLinks(source.id) });
+  });
+
+  app.post("/api/sources/:id/revisions", async (req, res) => {
+    const source = dependencies.getMemorySource(req.params.id);
+    if (!source) return res.status(404).json({ error: "Source not found" });
+    const parsed = zSourceRevision.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues });
+    const revision = dependencies.createSourceRevision({
+      id: randomUUID(),
+      sourceId: source.id,
+      ...parsed.data,
+    });
+    try {
+      const result = await dependencies.ingestionService.reprocess(source.id, {
+        metadata: parsed.data.metadata,
+      });
+      res.status(201).json({ revision, ...result });
+    } catch (error) {
+      res.status(502).json({
+        error: "Reprocessing failed",
+        code: error.code || "INGESTION_FAILED",
+        sourceId: source.id,
+        revisionId: revision.id,
+        detail: error.message,
+      });
+    }
   });
 
   app.get("/api/catalog/memories", (req, res) => {
@@ -619,9 +602,12 @@ export function createAtlasApp(overrides = {}) {
     const { text, ingestionDate } = parsed.data;
 
     try {
-      const extraction = await dependencies.extractMemory(
+      const context = await retrieveExtractionContext(text, dependencies)
+        .catch(() => ({ entities: [] }));
+      const extraction = await dependencies.extractAtomicMemories(
         text,
         ingestionDate || new Date().toISOString(),
+        context,
       );
       res.json(extraction);
     } catch (error) {
@@ -827,6 +813,7 @@ function comparisonResponse({
 }
 
 export function startAtlasServer(port = PORT) {
+  assertAtlasModeSupported();
   const app = createAtlasApp();
   return app.listen(port, () => {
     log.info("server started", { port, url: `http://localhost:${port}` });

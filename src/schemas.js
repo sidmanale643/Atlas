@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SEMANTIC_EXTRACTION_SCHEMA_VERSION = 2;
+export const SEMANTIC_EXTRACTION_SCHEMA_VERSION = 3;
 export const COGNITIVE_ANNOTATION_SCHEMA_VERSION = 1;
 export const SEMANTIC_SCHEMA_VERSION = SEMANTIC_EXTRACTION_SCHEMA_VERSION;
 export const COGNITIVE_SCHEMA_VERSION = COGNITIVE_ANNOTATION_SCHEMA_VERSION;
@@ -33,11 +33,13 @@ export const AddMemorySchema = z.object({
       "observation",
       "error",
     ])
+    .optional()
     .describe("Fallback classification for the submitted source"),
   title: z
     .string()
     .min(1, "title is required")
     .max(50, "title must be 50 characters or fewer")
+    .optional()
     .describe("Fallback title for the submitted source"),
   confidence: z
     .number()
@@ -113,6 +115,31 @@ export const RelationshipSchema = z.object({
   evidence: z.string(),
 });
 
+// V2 remains exported so stored extractions can be classified by shape during
+// migration. New extraction and persistence code must use the V3 schemas below.
+export const LegacyAtomicMemorySchema = z.object({
+  text: z.string().trim().min(1),
+  summary: z.string().trim().min(1),
+  types: z.array(MemoryTypeSchema).superRefine((types, ctx) => {
+    const totalWeight = types.reduce((sum, type) => sum + type.weight, 0);
+    if (totalWeight > 1.0001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Type weights sum to ${totalWeight.toFixed(3)}, which exceeds 1.0`,
+      });
+    }
+  }),
+  occurredAt: OccurredAtSchema,
+  entities: z.array(EntitySchema),
+  relationships: z.array(RelationshipSchema),
+  actions: z.array(z.string().min(1)),
+  topics: z.array(z.string().min(1)),
+}).strict();
+
+export const LegacySemanticExtractionSchema = z.object({
+  memories: z.array(LegacyAtomicMemorySchema),
+}).strict();
+
 const WeightedMemoryTypesSchema = z.array(MemoryTypeSchema).superRefine(
   (types, ctx) => {
     const totalWeight = types.reduce((sum, type) => sum + type.weight, 0);
@@ -125,23 +152,149 @@ const WeightedMemoryTypesSchema = z.array(MemoryTypeSchema).superRefine(
   },
 );
 
-export const AtomicMemorySchema = z.object({
-  text: z.string().trim().min(1),
-  summary: z.string().trim().min(1),
-  types: WeightedMemoryTypesSchema,
-  occurredAt: OccurredAtSchema,
-  entities: z.array(EntitySchema),
-  relationships: z.array(RelationshipSchema),
-  actions: z.array(z.string().min(1)),
-  topics: z.array(z.string().min(1)),
+const V3TextSchema = (maximum) => z.string().trim().min(1).max(maximum);
+
+function isValidIsoDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?$/.exec(value);
+  if (!match) return false;
+  const [, year, month, day] = match.map(Number);
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  return calendarDate.getUTCFullYear() === year
+    && calendarDate.getUTCMonth() === month - 1
+    && calendarDate.getUTCDate() === day
+    && !Number.isNaN(Date.parse(value));
+}
+
+export const EvidenceSpanSchema = z.object({
+  start: z.number().int().nonnegative(),
+  end: z.number().int().positive(),
+  text: z.string().min(1),
+}).strict().superRefine((span, ctx) => {
+  if (span.end <= span.start) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "evidence span end must be greater than start",
+      path: ["end"],
+    });
+  }
+});
+
+export const DurabilitySchema = z.object({
+  durable: z.boolean(),
+  confidence: z.number().min(0).max(1),
+  reason: V3TextSchema(500),
 }).strict();
 
+export const V3OccurredAtSchema = z.object({
+  text: z.string().max(200),
+  normalized: z.string().refine(
+    isValidIsoDate,
+    "normalized must be a valid ISO-8601 date or timestamp",
+  ).nullable(),
+  confidence: z.number().min(0).max(1),
+}).strict();
+
+export const V3MemoryTypeSchema = z.object({
+  type: MemoryTypeSchema.shape.type,
+  weight: z.number().positive().max(1),
+}).strict();
+
+const V3MemoryTypesSchema = z.array(V3MemoryTypeSchema).max(6).superRefine(
+  (types, ctx) => {
+    const seen = new Set();
+    for (const [index, item] of types.entries()) {
+      if (seen.has(item.type)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `duplicate memory type: ${item.type}`,
+          path: [index, "type"],
+        });
+      }
+      seen.add(item.type);
+    }
+    const totalWeight = types.reduce((sum, item) => sum + item.weight, 0);
+    if (totalWeight > 1.0001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Type weights sum to ${totalWeight.toFixed(3)}, which exceeds 1.0`,
+      });
+    }
+  },
+);
+
+const EvidenceSpanIndexesSchema = z.array(
+  z.number().int().nonnegative(),
+).min(1).max(5).superRefine((indexes, ctx) => {
+  if (new Set(indexes).size !== indexes.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "evidence span indexes must be unique",
+    });
+  }
+});
+
+export const V3EntitySchema = z.object({
+  mention: V3TextSchema(200),
+  kind: EntitySchema.shape.kind,
+  canonicalName: V3TextSchema(200).nullable(),
+  confidence: z.number().min(0).max(1),
+  evidenceSpanIndexes: EvidenceSpanIndexesSchema,
+}).strict();
+
+export const V3RelationshipSchema = z.object({
+  subject: V3TextSchema(200),
+  predicate: V3TextSchema(120),
+  object: V3TextSchema(200),
+  confidence: z.number().min(0).max(1),
+  evidenceSpanIndexes: EvidenceSpanIndexesSchema,
+}).strict();
+
+export const AtomicMemorySchema = z.object({
+  text: V3TextSchema(2000),
+  summary: V3TextSchema(500),
+  evidenceSpans: z.array(EvidenceSpanSchema).min(1).max(5),
+  durability: DurabilitySchema,
+  boundaryReason: V3TextSchema(500),
+  types: V3MemoryTypesSchema,
+  occurredAt: V3OccurredAtSchema,
+  entities: z.array(V3EntitySchema).max(12),
+  relationships: z.array(V3RelationshipSchema).max(12),
+  actions: z.array(V3TextSchema(120)).max(8),
+  topics: z.array(V3TextSchema(100)).max(8),
+}).strict().superRefine((memory, ctx) => {
+  for (let index = 1; index < memory.evidenceSpans.length; index += 1) {
+    if (memory.evidenceSpans[index].start < memory.evidenceSpans[index - 1].end) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "evidence spans must be ordered and non-overlapping",
+        path: ["evidenceSpans", index],
+      });
+    }
+  }
+});
+
 export const SemanticExtractionSchema = z.object({
-  memories: z.array(AtomicMemorySchema),
+  memories: z.array(AtomicMemorySchema).max(25),
 }).strict();
 
 export const SemanticExtractionJsonSchema =
   SemanticExtractionSchema.toJSONSchema();
+
+const LlmEvidenceSpanSchema = z.object({
+  text: z.string().min(1),
+}).strict();
+
+const LlmAtomicMemorySchema = z.object({
+  ...AtomicMemorySchema.shape,
+  evidenceSpans: z.array(LlmEvidenceSpanSchema).min(1).max(5),
+}).strict();
+
+const LlmSemanticExtractionSchema = z.object({
+  memories: z.array(LlmAtomicMemorySchema).max(25),
+}).strict();
+
+export const LlmSemanticExtractionJsonSchema =
+  LlmSemanticExtractionSchema.toJSONSchema();
 
 export const CognitiveAnnotationSchema = z.object({
   emotions: z.array(EmotionSchema),

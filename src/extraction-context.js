@@ -1,18 +1,31 @@
-export const EXTRACTION_CONTEXT_LIMIT = 10;
+export const EXTRACTION_CONTEXT_LIMIT = 5;
+export const EXTRACTION_CONTEXT_THRESHOLD = 0.7;
 
 export async function retrieveExtractionContext(
   text,
-  { searchMemoryVectors, getMemory },
+  { searchMemoryVectors, getEntitiesForMemory },
 ) {
   const hits = await searchMemoryVectors(text, {
     limit: EXTRACTION_CONTEXT_LIMIT,
   });
 
-  return hits
+  const entities = hits
+    .filter(({ score }) => Number(score) >= EXTRACTION_CONTEXT_THRESHOLD)
     .slice(0, EXTRACTION_CONTEXT_LIMIT)
-    .map(({ id, score }) => {
-      const memory = getMemory(id);
-      return memory ? { ...memory, similarity: score } : null;
-    })
-    .filter(Boolean);
+    .flatMap(({ id }) => getEntitiesForMemory?.(id) || [])
+    .map((entity) => ({
+      canonicalName: entity.canonical_name || entity.canonicalName,
+      aliases: [entity.mention].filter(Boolean),
+      kind: entity.kind,
+    }));
+  const unique = new Map();
+  for (const entity of entities) {
+    if (!entity.canonicalName || !entity.kind) continue;
+    const key = `${entity.kind}:${entity.canonicalName.toLocaleLowerCase()}`;
+    const current = unique.get(key);
+    unique.set(key, current
+      ? { ...current, aliases: [...new Set([...current.aliases, ...entity.aliases])] }
+      : entity);
+  }
+  return { entities: [...unique.values()] };
 }

@@ -14,6 +14,16 @@ import {
   storeMemory,
   updateMemoryGraph,
   updateMemorySummary,
+  createMemorySource,
+  enqueueAnnotationJob,
+  enqueueVectorIndexJob,
+  getAnnotationStatus,
+  getMemorySource,
+  getSourceMemoryLinks,
+  getVectorIndexStatus,
+  linkSourceMemory,
+  updateMemorySourceStatus,
+  withTransaction,
 } from "../db.js";
 import {
   deleteMemoryVector,
@@ -23,6 +33,7 @@ import {
 } from "../vector-store.js";
 import { getRelatedMemories as deriveRelatedMemories } from "../related-memories.js";
 import { retrieveExtractionContext } from "../extraction-context.js";
+import { createIngestionService } from "../ingestion-service.js";
 
 function serializeMemory(memory) {
   if (!memory) return null;
@@ -66,6 +77,16 @@ export function defaultDependencies() {
     storeMemory,
     updateMemoryGraph,
     updateMemorySummary,
+    createMemorySource,
+    updateMemorySourceStatus,
+    getMemorySource,
+    getSourceMemoryLinks,
+    linkSourceMemory,
+    enqueueAnnotationJob,
+    enqueueVectorIndexJob,
+    getAnnotationStatus,
+    getVectorIndexStatus,
+    withTransaction,
   };
 
   dependencies.getModel = async () => {
@@ -87,19 +108,7 @@ export function defaultDependencies() {
       options,
     );
 
-  // Lazy: only build the ingestion service when `add` is actually invoked.
-  dependencies.ingestionService = {
-    ingest: async (input) => {
-      const mod = await import("../memory-write.js");
-      return mod.ingestMemory({
-        dependencies,
-        text: input.text,
-        source: input.source || "cli",
-        metadata: input.metadata || {},
-      });
-    },
-  };
+  dependencies.ingestionService = createIngestionService(dependencies);
 
   return dependencies;
 }
-

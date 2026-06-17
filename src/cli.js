@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { parseArgs } from "./cli/args.js";
 import { defaultDependencies } from "./cli/deps.js";
+import { assertAtlasModeSupported } from "./vector-store.js";
 
 process.env.LOG_STREAM = "stderr";
 
@@ -19,6 +20,7 @@ import * as entities from "./cli/commands/entities.js";
 import * as entityCmd from "./cli/commands/entity.js";
 import * as update from "./cli/commands/update.js";
 import * as del from "./cli/commands/delete.js";
+import * as config from "./cli/commands/config.js";
 
 const COMMANDS = {
   add,
@@ -30,6 +32,7 @@ const COMMANDS = {
   entity: entityCmd,
   update,
   delete: del,
+  config,
 };
 
 function loadVersion() {
@@ -74,6 +77,7 @@ Commands:
   entity <id>           List memories for one entity
   update <id>           Replace a memory's summary (reindexes the vector)
   delete <id>           Permanently delete a memory
+  config                View and edit configuration
 
 Global flags:
   --help, -h            Show this help (or per-command help: atlas <cmd> --help)
@@ -157,8 +161,13 @@ function isInvokedAsMain() {
 const isMain = isInvokedAsMain();
 
 if (isMain) {
-  const deps = defaultDependencies();
-  runCli(process.argv.slice(2), deps)
+  let deps;
+  Promise.resolve()
+    .then(() => {
+      assertAtlasModeSupported();
+      deps = defaultDependencies();
+      return runCli(process.argv.slice(2), deps);
+    })
     .then((result) => {
       if (result && Number.isInteger(result.exitCode)) {
         process.exitCode = result.exitCode;
@@ -170,7 +179,7 @@ if (isMain) {
     })
     .finally(() => {
       try {
-        deps.closeDb();
+        deps?.closeDb();
       } catch {
         // Ignore: closeDb is idempotent and may not exist in tests.
       }

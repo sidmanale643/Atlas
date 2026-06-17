@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
+import { connect as connectLanceDb } from "@lancedb/lancedb";
 import { QdrantClient } from "@qdrant/js-client-rest";
+import {
+  Field,
+  FixedSizeList,
+  Float32,
+  Float64,
+  List,
+  Schema,
+  Utf8,
+} from "apache-arrow";
 
 export const EMBEDDING_MODEL =
   process.env.EMBEDDING_MODEL || "Xenova/all-MiniLM-L6-v2";
@@ -9,6 +19,8 @@ export const EMBEDDING_DIMENSIONS = Number.parseInt(
 );
 export const QDRANT_COLLECTION =
   process.env.QDRANT_COLLECTION || "atlas_memories";
+export const LANCEDB_PATH = process.env.LANCEDB_PATH || "./lancedb";
+export const LANCEDB_TABLE = process.env.LANCEDB_TABLE || "atlas_memories";
 
 let embedderPromise;
 let defaultStore;
@@ -190,6 +202,204 @@ export function createMemoryVectorStore({
   };
 }
 
+function lanceDbSchema(vectorSize, embeddingModel) {
+  return new Schema(
+    [
+      new Field("memory_id", new Utf8(), false),
+      new Field(
+        "vector",
+        new FixedSizeList(
+          vectorSize,
+          new Field("item", new Float32(), false),
+        ),
+        false,
+      ),
+      new Field("type", new Utf8(), true),
+      new Field("title", new Utf8(), true),
+      new Field("confidence", new Float64(), true),
+      new Field(
+        "tags",
+        new List(new Field("item", new Utf8(), false)),
+        false,
+      ),
+      new Field("scope", new Utf8(), false),
+      new Field("embedding_model", new Utf8(), false),
+      new Field("source", new Utf8(), false),
+      new Field("ingestion_date", new Utf8(), true),
+      new Field("created_at", new Utf8(), true),
+      new Field("updated_at", new Utf8(), true),
+    ],
+    new Map([
+      ["embedding_model", embeddingModel],
+      ["embedding_dimensions", String(vectorSize)],
+    ]),
+  );
+}
+
+function escapeSqlString(value) {
+  return String(value).replaceAll("'", "''");
+}
+
+function validateVector(vector, vectorSize) {
+  if (!Array.isArray(vector) && !ArrayBuffer.isView(vector)) {
+    throw new Error("Embedding must be an array or typed array");
+  }
+  if (vector.length !== vectorSize) {
+    throw new Error(
+      `Embedding has ${vector.length} dimensions; expected ${vectorSize}`,
+    );
+  }
+}
+
+export function createLanceDbMemoryVectorStore({
+  connection,
+  path = LANCEDB_PATH,
+  tableName = LANCEDB_TABLE,
+  embed = embedText,
+  vectorSize = EMBEDDING_DIMENSIONS,
+  embeddingModel = EMBEDDING_MODEL,
+} = {}) {
+  if (!Number.isInteger(vectorSize) || vectorSize <= 0) {
+    throw new Error("LanceDB vector size must be a positive integer");
+  }
+
+  let connectionPromise = connection
+    ? Promise.resolve(connection)
+    : undefined;
+  let tablePromise;
+
+  async function getConnection() {
+    if (!connectionPromise) {
+      connectionPromise = connectLanceDb(path).catch((error) => {
+        connectionPromise = undefined;
+        throw error;
+      });
+    }
+    return connectionPromise;
+  }
+
+  async function validateTable(table) {
+    const schema = await table.schema();
+    const vectorField = schema.fields.find((field) => field.name === "vector");
+    const actualSize = vectorField?.type?.listSize;
+    if (actualSize !== vectorSize) {
+      throw new Error(
+        `LanceDB table "${tableName}" uses ${actualSize ?? "unknown"} dimensions; expected ${vectorSize}`,
+      );
+    }
+
+    const actualModel = schema.metadata?.get("embedding_model");
+    if (actualModel !== embeddingModel) {
+      throw new Error(
+        `LanceDB table "${tableName}" uses embedding model "${actualModel || "unknown"}"; expected "${embeddingModel}"`,
+      );
+    }
+    return table;
+  }
+
+  async function ensureTable() {
+    if (!tablePromise) {
+      tablePromise = (async () => {
+        const db = await getConnection();
+        const names = await db.tableNames();
+        const table = names.includes(tableName)
+          ? await db.openTable(tableName)
+          : await db.createEmptyTable(
+              tableName,
+              lanceDbSchema(vectorSize, embeddingModel),
+              { mode: "create", existOk: true },
+            );
+        return validateTable(table);
+      })().catch((error) => {
+        tablePromise = undefined;
+        throw error;
+      });
+    }
+    return tablePromise;
+  }
+
+  async function indexMemory(memory) {
+    if (!memory?.id) throw new Error("Memory ID is required for vector indexing");
+
+    const vector = await embed(memoryEmbeddingText(memory));
+    validateVector(vector, vectorSize);
+    const table = await ensureTable();
+    await table
+      .mergeInsert("memory_id")
+      .whenMatchedUpdateAll()
+      .whenNotMatchedInsertAll()
+      .execute([
+        {
+          memory_id: String(memory.id),
+          vector: Array.from(vector),
+          type: memory.type == null ? null : String(memory.type),
+          title: memory.title == null ? null : String(memory.title),
+          confidence:
+            memory.confidence == null ? null : Number(memory.confidence),
+          tags: (memory.tags || []).map(String),
+          scope: "agent",
+          embedding_model: embeddingModel,
+          source: String(memory.source || "ui"),
+          ingestion_date:
+            memory.ingestion_date == null
+              ? null
+              : String(memory.ingestion_date),
+          created_at:
+            memory.created_at == null ? null : String(memory.created_at),
+          updated_at:
+            memory.updated_at == null ? null : String(memory.updated_at),
+        },
+      ]);
+  }
+
+  async function searchMemories(query, { limit = 10, scoreThreshold } = {}) {
+    const vector = await embed(query);
+    validateVector(vector, vectorSize);
+    const table = await ensureTable();
+    const rows = await table
+      .vectorSearch(Array.from(vector))
+      .distanceType("cosine")
+      .select(["memory_id", "_distance"])
+      .limit(limit)
+      .toArray();
+
+    return rows
+      .map((row) => ({
+        id: row.memory_id,
+        score: 1 - row._distance,
+      }))
+      .filter(
+        (row) =>
+          typeof row.id === "string" &&
+          (scoreThreshold == null || row.score >= scoreThreshold),
+      );
+  }
+
+  async function deleteMemory(memoryId) {
+    const db = await getConnection();
+    if (!(await db.tableNames()).includes(tableName)) return;
+    const table = await ensureTable();
+    await table.delete(`memory_id = '${escapeSqlString(memoryId)}'`);
+  }
+
+  async function deleteAllMemories() {
+    const db = await getConnection();
+    if (!(await db.tableNames()).includes(tableName)) return;
+
+    const table = await tablePromise;
+    table?.close();
+    await db.dropTable(tableName);
+    tablePromise = undefined;
+  }
+
+  return {
+    deleteAllMemories,
+    deleteMemory,
+    indexMemory,
+    searchMemories,
+  };
+}
+
 export function getQdrantCloudConfig(environment = process.env) {
   const url = String(environment.QDRANT_URL || "").trim();
   const apiKey = String(environment.QDRANT_API_KEY || "").trim();
@@ -237,11 +447,23 @@ export function createQdrantCloudClient(environment = process.env) {
   });
 }
 
+export function assertAtlasModeSupported(environment = process.env) {
+  const mode = String(environment.ATLAS_MODE || "local").trim().toLowerCase();
+  if (mode === "cloud") {
+    throw new Error(
+      "ATLAS_MODE=cloud is not available yet; managed Atlas cloud service support has not been implemented.",
+    );
+  }
+  if (mode !== "local") {
+    throw new Error(`Invalid ATLAS_MODE "${mode}"; expected "local" or "cloud".`);
+  }
+  return mode;
+}
+
 function getDefaultStore() {
   if (!defaultStore) {
-    defaultStore = createMemoryVectorStore({
-      client: createQdrantCloudClient(),
-    });
+    assertAtlasModeSupported();
+    defaultStore = createLanceDbMemoryVectorStore();
   }
   return defaultStore;
 }

@@ -5,24 +5,17 @@ import {
   SEMANTIC_EXTRACTION_SCHEMA_VERSION,
 } from "./schemas.js";
 
-const DEFAULT_METADATA = Object.freeze({
-  confidence: 0.6,
-  tags: [],
-});
+const DEFAULT_METADATA = Object.freeze({ confidence: 0.6, tags: [] });
 
 export function createIngestionService(dependencies) {
-  const {
-    createMemorySource,
-    updateMemorySourceStatus,
-    extractAtomicMemories,
-  } = dependencies;
-
-  if (
-    typeof createMemorySource !== "function"
-    || typeof updateMemorySourceStatus !== "function"
-    || typeof extractAtomicMemories !== "function"
-  ) {
-    throw new Error("Ingestion service is missing required dependencies");
+  for (const name of [
+    "createMemorySource", "updateMemorySourceStatus", "extractAtomicMemories",
+    "storeMemory", "updateMemoryGraph", "getMemory", "linkSourceMemory",
+    "enqueueAnnotationJob", "enqueueVectorIndexJob", "withTransaction",
+  ]) {
+    if (typeof dependencies[name] !== "function") {
+      throw new Error(`Ingestion service is missing required dependency: ${name}`);
+    }
   }
 
   async function ingest({
@@ -32,19 +25,24 @@ export function createIngestionService(dependencies) {
     metadata = {},
     sourceId = randomUUID(),
   }) {
-    createMemorySource({
-      id: sourceId,
-      text,
-      source,
-      ingestionDate,
-    });
-    return processSource({
-      sourceId,
-      text,
-      ingestionDate,
-      source,
-      metadata,
-    });
+    const existing = dependencies.getMemorySource?.(sourceId);
+    if (existing) {
+      if (existing.text !== text) {
+        throw new Error(`Source ${sourceId} already exists with different text`);
+      }
+      if (existing.extraction_status === "completed") {
+        return completedSourceResult(existing);
+      }
+    } else {
+      dependencies.createMemorySource({
+        id: sourceId,
+        text,
+        source,
+        ingestionDate,
+        metadata,
+      });
+    }
+    return processSource({ sourceId, text, ingestionDate, source, metadata });
   }
 
   async function reprocess(sourceId, { metadata = {} } = {}) {
@@ -57,12 +55,9 @@ export function createIngestionService(dependencies) {
       sourceId,
       sourceRevisionId: revision?.id ?? null,
       text: revision?.text ?? sourceRecord.text,
-      ingestionDate:
-        sourceRecord.ingestion_date
-        ?? sourceRecord.ingestionDate
-        ?? new Date().toISOString(),
-      source: sourceRecord.source || "ui",
-      metadata,
+      ingestionDate: sourceRecord.ingestion_date,
+      source: sourceRecord.source,
+      metadata: { ...sourceRecord.metadata_json, ...metadata },
     });
   }
 
@@ -74,183 +69,136 @@ export function createIngestionService(dependencies) {
     source,
     metadata,
   }) {
-    updateMemorySourceStatus(sourceId, "processing", {
+    const model = await resolveModel(dependencies);
+    dependencies.updateMemorySourceStatus(sourceId, "processing", {
       incrementAttempts: true,
-      model: dependencies.model,
+      model,
       schemaVersion: SEMANTIC_EXTRACTION_SCHEMA_VERSION,
     });
 
-    let similarMemories = [];
     try {
-      similarMemories = await retrieveExtractionContext(text, dependencies);
-    } catch {
-      // Vector search is optional context, not a prerequisite for ingestion.
-    }
-
-    let semanticExtraction;
-    try {
-      semanticExtraction = await extractAtomicMemories(
+      const canonicalizationContext = await optionalCanonicalizationContext(
+        text,
+        dependencies,
+      );
+      const semanticExtraction = await dependencies.extractAtomicMemories(
         text,
         ingestionDate,
-        similarMemories,
+        canonicalizationContext,
       );
-    } catch (error) {
-      updateMemorySourceStatus(sourceId, "extraction_failed", {
-        error: error.message,
-        model: dependencies.model,
-        schemaVersion: SEMANTIC_EXTRACTION_SCHEMA_VERSION,
-      });
-      throw error;
-    }
 
-    const prepared = [];
-    for (const atom of semanticExtraction.memories) {
-      prepared.push(
-        await prepareAtom({
+      const prepared = [];
+      for (const atom of semanticExtraction.memories) {
+        prepared.push(await prepareAtom({
           atom,
           source,
           ingestionDate,
           metadata,
-        }),
-      );
-    }
+          model,
+        }));
+      }
 
-    const persist = () => {
-      const outcomes = prepared.map((item) =>
-        persistAtom({
+      const outcomes = dependencies.withTransaction(() => {
+        const persisted = prepared.map((item) => persistAtom({
           ...item,
           sourceId,
           sourceRevisionId,
           source,
           ingestionDate,
-        }),
-      );
-      updateMemorySourceStatus(sourceId, "completed", {
-        model: dependencies.model,
+          model,
+        }));
+        dependencies.updateMemorySourceStatus(sourceId, "completed", {
+          model,
+          schemaVersion: SEMANTIC_EXTRACTION_SCHEMA_VERSION,
+        });
+        return persisted;
+      });
+
+      return {
+        sourceId,
+        status: "completed",
+        memories: outcomes,
+        ...(outcomes.length === 0 ? { reason: "no_durable_memory" } : {}),
+      };
+    } catch (error) {
+      dependencies.updateMemorySourceStatus(sourceId, "failed", {
+        error: error.message,
+        model,
         schemaVersion: SEMANTIC_EXTRACTION_SCHEMA_VERSION,
       });
-      return outcomes;
-    };
-    const outcomes = dependencies.withTransaction
-      ? dependencies.withTransaction(persist)
-      : persist();
-
-    await Promise.all(
-      outcomes
-        .filter(({ action }) => action !== "unchanged")
-        .map(async ({ memory }) => {
-          try {
-            await dependencies.indexMemoryVector(memory);
-            return true;
-          } catch {
-            return false;
-          }
-        }),
-    );
-
-    return { sourceId, memories: outcomes };
+      error.sourceId = sourceId;
+      error.code ||= "INGESTION_FAILED";
+      throw error;
+    }
   }
 
-  async function prepareAtom({ atom, source, ingestionDate, metadata }) {
-    let candidates = [];
-    let candidatesAvailable = true;
-    try {
-      candidates = await retrieveExtractionContext(atom.text, dependencies);
-    } catch {
-      candidatesAvailable = false;
-    }
-
+  async function prepareAtom({ atom, source, ingestionDate, metadata, model }) {
+    const candidates = await writeCandidates(atom.text, dependencies);
     let decision = createDecision("No similar stored memory was found.", 1);
-    if (candidatesAvailable && candidates.length > 0) {
+    if (candidates.available && candidates.items.length > 0) {
       try {
         decision = await dependencies.decideMemoryWrite(
-          {
-            text: atom.text,
-            summary: atom.summary,
-            ...atomMetadata(atom, metadata),
-          },
-          candidates.map(({ id }) => serializeCandidate(id, dependencies))
-            .filter(Boolean),
+          { text: atom.text, summary: atom.summary, ...atomMetadata(atom, metadata) },
+          candidates.items,
         );
       } catch {
         decision = createDecision("Memory matching was inconclusive.");
       }
-    } else if (!candidatesAvailable) {
+    } else if (!candidates.available) {
       decision = createDecision("Memory candidate search was unavailable.");
     }
 
-    const validMatch = decision.action === "create"
-      || (
-        decision.confidence >= 0.85
-        && candidates.some(({ id }) => id === decision.matchedMemoryId)
-      );
-    if (!validMatch) {
-      decision = createDecision("The possible memory match was uncertain.");
+    if (decision.action !== "create") {
+      const valid = decision.confidence >= 0.85
+        && candidates.items.some(({ id }) => id === decision.matchedMemoryId);
+      if (!valid) decision = createDecision("The possible memory match was uncertain.");
     }
 
     let storedAtom = atom;
     const replacementText = decision.replacementText?.trim();
-    if (
-      decision.action === "update"
-      && replacementText
-      && replacementText !== atom.text
-    ) {
-      let replacementContext = [];
-      try {
-        replacementContext = await retrieveExtractionContext(
-          replacementText,
-          dependencies,
-        );
-      } catch {
-        // Replacement extraction remains valid without vector context.
-      }
+    if (decision.action === "update" && replacementText && replacementText !== atom.text) {
       const replacement = await dependencies.extractAtomicMemories(
         replacementText,
         ingestionDate,
-        replacementContext,
+        await optionalCanonicalizationContext(replacementText, dependencies),
       );
       if (replacement.memories.length !== 1) {
-        throw new Error(
-          "Memory update replacement must resolve to one atomic memory",
-        );
+        throw new Error("Memory update replacement must resolve to exactly one atomic memory");
       }
       storedAtom = replacement.memories[0];
     }
 
     return {
       atom: storedAtom,
+      sourceEvidence: atom.evidenceSpans,
       decision,
-      memoryId:
-        decision.action === "create"
-          ? dependencies.createMemoryId?.() ?? randomUUID()
-          : decision.matchedMemoryId,
-      metadata: atomMetadata(atom, metadata),
+      memoryId: decision.action === "create"
+        ? dependencies.createMemoryId?.() ?? randomUUID()
+        : decision.matchedMemoryId,
+      metadata: atomMetadata(storedAtom, metadata),
       source,
       ingestionDate,
+      model,
     };
   }
 
   function persistAtom({
-    atom,
-    decision,
-    memoryId,
-    metadata,
-    sourceId,
-    sourceRevisionId,
-    source,
-    ingestionDate,
+    atom, sourceEvidence, decision, memoryId, metadata, sourceId,
+    sourceRevisionId, source, ingestionDate, model,
   }) {
     let memory;
     if (decision.action === "unchanged") {
       memory = dependencies.getMemory(memoryId);
+      if (!memory) throw new Error(`Matched memory not found: ${memoryId}`);
     } else if (decision.action === "update") {
       memory = dependencies.updateMemoryGraph({
         memoryId,
         rawText: atom.text,
         ingestionDate,
         extraction: atom,
-        model: dependencies.model,
+        model,
         metadata,
+        schemaVersion: SEMANTIC_EXTRACTION_SCHEMA_VERSION,
       }).memory;
     } else {
       memory = dependencies.storeMemory(
@@ -258,109 +206,139 @@ export function createIngestionService(dependencies) {
         atom.text,
         ingestionDate,
         atom,
-        dependencies.model,
+        model,
         source,
         metadata,
       );
     }
 
+    const action = normalizeAction(decision.action);
     dependencies.linkSourceMemory({
       sourceId,
       sourceRevisionId,
       memoryId,
-      action: decision.action,
-      evidence: [],
+      action,
+      evidence: sourceEvidence,
+      model,
+      schemaVersion: SEMANTIC_EXTRACTION_SCHEMA_VERSION,
+      confidence: decision.confidence,
+      reason: decision.reason,
     });
-    if (decision.action !== "unchanged") {
+    if (action !== "unchanged") {
       dependencies.enqueueAnnotationJob({
         memoryId,
         sourceId,
-        model: dependencies.model,
+        model,
         schemaVersion: COGNITIVE_ANNOTATION_SCHEMA_VERSION,
       });
+      dependencies.enqueueVectorIndexJob({ memoryId, sourceId });
     }
 
+    const serialized = dependencies.serializeMemory?.(memory) ?? memory;
     return {
-      action: normalizeAction(decision.action),
-      memory,
-      matchedMemoryId:
-        decision.action === "create" ? null : decision.matchedMemoryId,
+      action,
+      memory: serialized,
+      matchedMemoryId: action === "created" ? null : decision.matchedMemoryId,
       confidence: decision.confidence,
       reason: decision.reason,
-      annotationStatus: normalizeAnnotationStatus(
-        dependencies.getAnnotationStatus?.(memoryId),
-      ),
+      evidenceSpans: sourceEvidence,
+      annotationStatus: action === "unchanged"
+        ? normalizeStatus(dependencies.getAnnotationStatus?.(memoryId), "completed")
+        : "pending",
+      indexStatus: action === "unchanged"
+        ? normalizeStatus(dependencies.getVectorIndexStatus?.(memoryId), "completed")
+        : "pending",
+    };
+  }
+
+  function completedSourceResult(sourceRecord) {
+    const links = dependencies.getSourceMemoryLinks?.(sourceRecord.id) || [];
+    return {
+      sourceId: sourceRecord.id,
+      status: "completed",
+      memories: links.map((link) => ({
+        action: link.action,
+        memory: dependencies.serializeMemory?.(dependencies.getMemory(link.memory_id))
+          ?? dependencies.getMemory(link.memory_id),
+        matchedMemoryId: link.action === "created" ? null : link.memory_id,
+        confidence: link.decision_confidence,
+        reason: link.decision_reason,
+        evidenceSpans: link.evidence_json,
+        annotationStatus: normalizeStatus(
+          dependencies.getAnnotationStatus?.(link.memory_id),
+          "completed",
+        ),
+        indexStatus: normalizeStatus(
+          dependencies.getVectorIndexStatus?.(link.memory_id),
+          "completed",
+        ),
+      })),
     };
   }
 
   return { ingest, reprocess };
 }
 
-export function atomicExtractionFromLegacy(text, extraction) {
-  return {
-    memories: [{
-      text,
-      summary: extraction.summary || text,
-      types: extraction.types || [],
-      occurredAt: extraction.occurredAt || {
-        text: "",
-        normalized: null,
-        confidence: 0,
-      },
-      entities: extraction.entities || [],
-      relationships: extraction.relationships || [],
-      actions: extraction.actions || [],
-      topics: extraction.topics || [],
-    }],
-  };
+async function optionalCanonicalizationContext(text, dependencies) {
+  try {
+    return await retrieveExtractionContext(text, dependencies);
+  } catch {
+    return { entities: [] };
+  }
+}
+
+async function writeCandidates(text, dependencies) {
+  try {
+    const hits = await dependencies.searchMemoryVectors(text, { limit: 5 });
+    return {
+      available: true,
+      items: hits.map(({ id }) => serializeCandidate(id, dependencies)).filter(Boolean),
+    };
+  } catch {
+    return { available: false, items: [] };
+  }
+}
+
+async function resolveModel(dependencies) {
+  return dependencies.model || dependencies.getModel?.() || "unknown";
 }
 
 function atomMetadata(atom, metadata) {
-  const supplied = Object.fromEntries(
-    Object.entries(metadata).filter(([, value]) => value !== undefined),
-  );
+  const extractedType = dominantType(atom.types);
   return {
     ...DEFAULT_METADATA,
-    ...supplied,
-    type: metadata.type || dominantType(atom.types),
-    title: metadata.title || atom.summary || atom.text.slice(0, 50),
+    type: metadata.forceType && metadata.type
+      ? metadata.type
+      : extractedType || metadata.type || "fact",
+    title: atom.summary || atom.text.slice(0, 50),
+    confidence: atom.durability?.confidence ?? DEFAULT_METADATA.confidence,
     tags: Array.isArray(metadata.tags) ? metadata.tags : [],
   };
 }
 
 function dominantType(types = []) {
-  return [...types].sort(
-    (left, right) =>
-      right.weight - left.weight || left.type.localeCompare(right.type),
-  )[0]?.type || "fact";
+  return [...types].sort((left, right) =>
+    right.weight - left.weight || left.type.localeCompare(right.type))[0]?.type || null;
 }
 
 function serializeCandidate(id, dependencies) {
   const memory = dependencies.getMemory(id);
   if (!memory) return null;
-  return {
-    ...memory,
-    extraction: dependencies.getLatestExtraction?.(id) ?? null,
-  };
+  const extraction = dependencies.getLatestExtraction?.(id)?.extraction_json ?? null;
+  return { id: memory.id, text: memory.raw_text, summary: memory.summary,
+    type: memory.type, title: memory.title, tags: memory.tags, extraction };
 }
 
 function createDecision(reason, confidence = 0) {
-  return {
-    action: "create",
-    matchedMemoryId: null,
-    confidence,
-    reason,
-    replacementText: "",
-  };
+  return { action: "create", matchedMemoryId: null, confidence, reason, replacementText: "" };
 }
 
 function normalizeAction(action) {
-  if (action === "create") return "created";
-  if (action === "update") return "updated";
-  return "unchanged";
+  return action === "create" ? "created" : action === "update" ? "updated" : "unchanged";
 }
 
-function normalizeAnnotationStatus(value) {
-  if (typeof value === "string") return value;
-  return value?.status || "pending";
+function normalizeStatus(status, fallback) {
+  return ["pending", "processing", "completed", "failed"].includes(status)
+    ? status
+    : fallback;
 }

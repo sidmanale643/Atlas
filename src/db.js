@@ -156,6 +156,104 @@ function initSchema() {
       UNIQUE(memory_id, revision_number)
     );
 
+    CREATE TABLE IF NOT EXISTS memory_sources (
+      id TEXT PRIMARY KEY,
+      text TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('ui', 'mcp', 'cli', 'import')),
+      ingestion_date TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      extraction_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (extraction_status IN ('pending', 'processing', 'completed', 'failed')),
+      extraction_attempts INTEGER NOT NULL DEFAULT 0,
+      extraction_error TEXT,
+      extraction_model TEXT,
+      extraction_schema_version INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS source_revisions (
+      id TEXT PRIMARY KEY,
+      source_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      author TEXT,
+      reason TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (source_id) REFERENCES memory_sources(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS source_memory_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id TEXT NOT NULL,
+      source_revision_id TEXT,
+      memory_id TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('created', 'updated', 'unchanged')),
+      evidence_json TEXT NOT NULL,
+      extraction_model TEXT,
+      extraction_schema_version INTEGER NOT NULL,
+      decision_confidence REAL NOT NULL,
+      decision_reason TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (source_id) REFERENCES memory_sources(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_revision_id) REFERENCES source_revisions(id) ON DELETE SET NULL,
+      FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS cognitive_annotations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id TEXT NOT NULL,
+      memory_version INTEGER NOT NULL,
+      annotation_json TEXT NOT NULL,
+      model TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+      UNIQUE(memory_id, memory_version, schema_version)
+    );
+
+    CREATE TABLE IF NOT EXISTS annotation_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id TEXT NOT NULL,
+      source_id TEXT,
+      memory_version INTEGER NOT NULL,
+      model TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 5,
+      available_at TEXT NOT NULL,
+      claimed_at TEXT,
+      completed_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_id) REFERENCES memory_sources(id) ON DELETE SET NULL,
+      UNIQUE(memory_id, memory_version, schema_version)
+    );
+
+    CREATE TABLE IF NOT EXISTS vector_index_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id TEXT NOT NULL,
+      source_id TEXT,
+      memory_version INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 8,
+      available_at TEXT NOT NULL,
+      claimed_at TEXT,
+      completed_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_id) REFERENCES memory_sources(id) ON DELETE SET NULL,
+      UNIQUE(memory_id, memory_version)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_extractions_memory ON memory_extractions(memory_id);
     CREATE INDEX IF NOT EXISTS idx_extractions_memory_latest
       ON memory_extractions(memory_id, created_at DESC, id DESC);
@@ -177,6 +275,18 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_memory_comparisons_right ON memory_comparisons(right_memory_id);
     CREATE INDEX IF NOT EXISTS idx_memory_revisions_memory
       ON memory_revisions(memory_id, revision_number DESC);
+    CREATE INDEX IF NOT EXISTS idx_sources_status
+      ON memory_sources(extraction_status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_source_revisions_source
+      ON source_revisions(source_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_source_links_source
+      ON source_memory_links(source_id, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_source_links_memory
+      ON source_memory_links(memory_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_annotation_jobs_claim
+      ON annotation_jobs(status, available_at, id);
+    CREATE INDEX IF NOT EXISTS idx_vector_jobs_claim
+      ON vector_index_jobs(status, available_at, id);
   `);
 
   const memoryColumns = db.prepare("PRAGMA table_info(memories)").all();
@@ -187,6 +297,7 @@ function initSchema() {
     ["confidence", "REAL NOT NULL DEFAULT 0.6"],
     ["tags", "TEXT NOT NULL DEFAULT '[]'"],
     ["scope", "TEXT NOT NULL DEFAULT 'agent'"],
+    ["version", "INTEGER NOT NULL DEFAULT 1"],
   ];
   for (const [name, definition] of memoryMigrations) {
     if (!memoryColumns.some((column) => column.name === name)) {
@@ -209,12 +320,15 @@ function initSchema() {
     db.exec("ALTER TABLE region_activations ADD COLUMN right_weight REAL");
   }
 
+  migrateSourceTables();
+
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source);
   `);
 
   mergeDuplicateEntities();
   backfillCanonicalEntityAliases();
+  backfillLegacySources();
 
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -227,6 +341,448 @@ function initSchema() {
     );
   `);
   syncMemoriesToFts();
+}
+
+function addMissingColumns(table, columns) {
+  const existingColumns = db.prepare(`PRAGMA table_info(${table})`).all();
+  for (const [name, definition] of columns) {
+    if (!existingColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+    }
+  }
+}
+
+function hasColumn(table, columnName) {
+  return db.prepare(`PRAGMA table_info(${table})`).all()
+    .some((column) => column.name === columnName);
+}
+
+function migrateSourceTables() {
+  addMissingColumns("memory_sources", [
+    ["text", "TEXT NOT NULL DEFAULT ''"],
+    ["source", "TEXT NOT NULL DEFAULT 'import'"],
+    ["ingestion_date", "TEXT NOT NULL DEFAULT ''"],
+    ["extraction_error", "TEXT"],
+    ["extraction_model", "TEXT"],
+    ["extraction_schema_version", "INTEGER"],
+  ]);
+  addMissingColumns("source_revisions", [
+    ["text", "TEXT NOT NULL DEFAULT ''"],
+    ["author", "TEXT"],
+  ]);
+  addMissingColumns("source_memory_links", [
+    ["extraction_model", "TEXT"],
+    ["extraction_schema_version", "INTEGER NOT NULL DEFAULT 1"],
+    ["decision_confidence", "REAL NOT NULL DEFAULT 0"],
+    ["decision_reason", "TEXT NOT NULL DEFAULT ''"],
+  ]);
+  migrateAnnotationJobs();
+}
+
+function migrateAnnotationJobs() {
+  const columns = db.prepare("PRAGMA table_info(annotation_jobs)").all();
+  const currentColumns = ["source_id", "memory_version", "available_at"];
+  if (currentColumns.every((name) =>
+    columns.some((column) => column.name === name))) {
+    return;
+  }
+
+  db.exec(`
+    DROP INDEX IF EXISTS idx_annotation_jobs_claim;
+    DROP INDEX IF EXISTS idx_annotation_jobs_memory;
+    ALTER TABLE annotation_jobs RENAME TO annotation_jobs_legacy;
+
+    CREATE TABLE annotation_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      memory_id TEXT NOT NULL,
+      source_id TEXT,
+      memory_version INTEGER NOT NULL,
+      model TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 5,
+      available_at TEXT NOT NULL,
+      claimed_at TEXT,
+      completed_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_id) REFERENCES memory_sources(id) ON DELETE SET NULL,
+      UNIQUE(memory_id, memory_version, schema_version)
+    );
+
+    INSERT OR IGNORE INTO annotation_jobs (
+      memory_id, source_id, memory_version, model, schema_version, status,
+      attempts, max_attempts, available_at, claimed_at, completed_at,
+      last_error, created_at, updated_at
+    )
+    SELECT
+      legacy.memory_id,
+      NULL,
+      COALESCE(memory.version, 1),
+      legacy.model,
+      legacy.schema_version,
+      CASE legacy.status WHEN 'retry' THEN 'pending' ELSE legacy.status END,
+      legacy.attempts,
+      legacy.max_attempts,
+      COALESCE(legacy.retry_at, legacy.created_at),
+      legacy.claimed_at,
+      legacy.completed_at,
+      legacy.last_error,
+      legacy.created_at,
+      legacy.updated_at
+    FROM annotation_jobs_legacy AS legacy
+    JOIN memories AS memory ON memory.id = legacy.memory_id
+    ORDER BY legacy.created_at, legacy.id;
+
+    DROP TABLE annotation_jobs_legacy;
+    CREATE INDEX idx_annotation_jobs_claim
+      ON annotation_jobs(status, available_at, id);
+    CREATE INDEX idx_annotation_jobs_memory
+      ON annotation_jobs(memory_id, created_at DESC);
+  `);
+}
+
+export function withTransaction(callback) {
+  return getDb().transaction(callback)();
+}
+
+// --- Immutable sources and durable work queues ---
+
+export function createMemorySource({ id, text, source = "ui", ingestionDate, metadata = {} }) {
+  const now = new Date().toISOString();
+  const database = getDb();
+  if (hasColumn("memory_sources", "content")) {
+    database.prepare(`
+      INSERT INTO memory_sources (
+        id, text, content, source, ingestion_date, metadata_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, text, text, source, ingestionDate, JSON.stringify(metadata), now, now);
+  } else {
+    database.prepare(`
+      INSERT INTO memory_sources (
+        id, text, source, ingestion_date, metadata_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, text, source, ingestionDate, JSON.stringify(metadata), now, now);
+  }
+  return getMemorySource(id);
+}
+
+export function getMemorySource(id, { includeRevisions = false } = {}) {
+  const database = getDb();
+  const row = database.prepare("SELECT * FROM memory_sources WHERE id = ?").get(id);
+  if (!row) return null;
+  const result = { ...row, metadata_json: parseJson(row.metadata_json, {}) };
+  if (includeRevisions) {
+    result.revisions = database.prepare(`
+      SELECT * FROM source_revisions
+      WHERE source_id = ? ORDER BY created_at DESC, id DESC
+    `).all(id).map((revision) => ({
+      ...revision,
+      metadata_json: parseJson(revision.metadata_json, {}),
+    }));
+  }
+  return result;
+}
+
+export function createSourceRevision({
+  id, sourceId, text, author = null, reason = null, metadata = {},
+}) {
+  const createdAt = new Date().toISOString();
+  const database = getDb();
+  if (hasColumn("source_revisions", "content")) {
+    const revisionNumber = database.prepare(`
+      SELECT COALESCE(MAX(revision_number), 0) + 1 AS value
+      FROM source_revisions WHERE source_id = ?
+    `).get(sourceId).value;
+    database.prepare(`
+      INSERT INTO source_revisions (
+        id, source_id, text, content, revision_number, author, reason,
+        metadata_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, sourceId, text, text, revisionNumber, author, reason,
+      JSON.stringify(metadata), createdAt);
+  } else {
+    database.prepare(`
+      INSERT INTO source_revisions (
+        id, source_id, text, author, reason, metadata_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, sourceId, text, author, reason, JSON.stringify(metadata), createdAt);
+  }
+  return database.prepare("SELECT * FROM source_revisions WHERE id = ?").get(id);
+}
+
+export function updateMemorySourceStatus(id, status, {
+  incrementAttempts = false,
+  error = null,
+  model = null,
+  schemaVersion = null,
+} = {}) {
+  const normalizedStatus = normalizeSourceStatus(status);
+  const updatedAt = new Date().toISOString();
+  getDb().prepare(`
+    UPDATE memory_sources
+    SET extraction_status = ?, extraction_attempts = extraction_attempts + ?,
+        extraction_error = ?, extraction_model = COALESCE(?, extraction_model),
+        extraction_schema_version = COALESCE(?, extraction_schema_version),
+        updated_at = ?
+    WHERE id = ?
+  `).run(normalizedStatus, incrementAttempts ? 1 : 0, error, model,
+    schemaVersion, updatedAt, id);
+  return getMemorySource(id);
+}
+
+function normalizeSourceStatus(status) {
+  if (status !== "failed" && status !== "extraction_failed") return status;
+  const tableSql = getDb().prepare(`
+    SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_sources'
+  `).get()?.sql || "";
+  return tableSql.includes("'extraction_failed'") ? "extraction_failed" : "failed";
+}
+
+export function linkSourceMemory({
+  sourceId, sourceRevisionId = null, memoryId, action, evidence,
+  model = null, schemaVersion = EXTRACTION_SCHEMA_VERSION,
+  confidence = 0, reason = "",
+}) {
+  const result = getDb().prepare(`
+    INSERT INTO source_memory_links (
+      source_id, source_revision_id, memory_id, action, evidence_json,
+      extraction_model, extraction_schema_version, decision_confidence,
+      decision_reason, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(sourceId, sourceRevisionId, memoryId, action,
+    JSON.stringify(evidence || []), model, schemaVersion, confidence, reason,
+    new Date().toISOString());
+  return result.lastInsertRowid;
+}
+
+export function getSourceMemoryLinks(sourceId) {
+  return getDb().prepare(`
+    SELECT * FROM source_memory_links WHERE source_id = ? ORDER BY id ASC
+  `).all(sourceId).map((row) => ({
+    ...row,
+    evidence_json: parseJson(row.evidence_json, []),
+  }));
+}
+
+function memoryVersion(memoryId) {
+  const memory = getDb().prepare("SELECT version FROM memories WHERE id = ?").get(memoryId);
+  if (!memory) throw new Error(`Memory not found: ${memoryId}`);
+  return memory.version;
+}
+
+export function enqueueAnnotationJob({ memoryId, sourceId = null, model, schemaVersion }) {
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    INSERT INTO annotation_jobs (
+      memory_id, source_id, memory_version, model, schema_version,
+      available_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(memory_id, memory_version, schema_version) DO NOTHING
+  `).run(memoryId, sourceId, memoryVersion(memoryId), model, schemaVersion,
+    now, now, now);
+}
+
+export function enqueueVectorIndexJob({ memoryId, sourceId = null }) {
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    INSERT INTO vector_index_jobs (
+      memory_id, source_id, memory_version, available_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(memory_id, memory_version) DO NOTHING
+  `).run(memoryId, sourceId, memoryVersion(memoryId), now, now, now);
+}
+
+export function getAnnotationStatus(memoryId) {
+  return getDb().prepare(`
+    SELECT status FROM annotation_jobs WHERE memory_id = ?
+    ORDER BY memory_version DESC, id DESC LIMIT 1
+  `).get(memoryId)?.status ?? null;
+}
+
+export function getVectorIndexStatus(memoryId) {
+  return getDb().prepare(`
+    SELECT status FROM vector_index_jobs WHERE memory_id = ?
+    ORDER BY memory_version DESC, id DESC LIMIT 1
+  `).get(memoryId)?.status ?? null;
+}
+
+function claimJob(table, now) {
+  const database = getDb();
+  return database.transaction(() => {
+    const job = database.prepare(`
+      SELECT * FROM ${table} WHERE status = 'pending' AND available_at <= ?
+      ORDER BY available_at ASC, id ASC LIMIT 1
+    `).get(now);
+    if (!job) return null;
+    database.prepare(`
+      UPDATE ${table} SET status = 'processing', attempts = attempts + 1,
+        claimed_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'
+    `).run(now, now, job.id);
+    return database.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(job.id);
+  })();
+}
+
+export function claimAnnotationJob({ now = new Date().toISOString() } = {}) {
+  return claimJob("annotation_jobs", now);
+}
+
+export function claimVectorIndexJob({ now = new Date().toISOString() } = {}) {
+  return claimJob("vector_index_jobs", now);
+}
+
+function recoverJobs(table, { now, retryAt = now, staleBefore }) {
+  return getDb().prepare(`
+    UPDATE ${table} SET status = 'pending', available_at = ?, claimed_at = NULL,
+      updated_at = ? WHERE status = 'processing' AND claimed_at < ?
+  `).run(retryAt, now, staleBefore).changes;
+}
+
+export function recoverAnnotationJobs(options) {
+  return recoverJobs("annotation_jobs", options);
+}
+
+export function recoverVectorIndexJobs(options) {
+  return recoverJobs("vector_index_jobs", options);
+}
+
+function retryJob(table, { jobId, error, retryAt, terminal = false, updatedAt }) {
+  getDb().prepare(`
+    UPDATE ${table} SET status = ?, available_at = ?, claimed_at = NULL,
+      last_error = ?, updated_at = ? WHERE id = ?
+  `).run(terminal ? "failed" : "pending", retryAt, error, updatedAt, jobId);
+}
+
+export function retryAnnotationJob(options) {
+  return retryJob("annotation_jobs", options);
+}
+
+export function retryVectorIndexJob(options) {
+  return retryJob("vector_index_jobs", options);
+}
+
+function completeJob(table, jobId, completedAt) {
+  getDb().prepare(`
+    UPDATE ${table} SET status = 'completed', completed_at = ?, claimed_at = NULL,
+      last_error = NULL, updated_at = ? WHERE id = ?
+  `).run(completedAt, completedAt, jobId);
+}
+
+export function completeAnnotationJob({ jobId, completedAt }) {
+  return completeJob("annotation_jobs", jobId, completedAt);
+}
+
+export function completeVectorIndexJob({ jobId, completedAt }) {
+  return completeJob("vector_index_jobs", jobId, completedAt);
+}
+
+function failJob(table, jobId, { error, failedAt }) {
+  getDb().prepare(`
+    UPDATE ${table} SET status = 'failed', last_error = ?, claimed_at = NULL,
+      updated_at = ? WHERE id = ?
+  `).run(error, failedAt, jobId);
+}
+
+export function failAnnotationJob(jobId, options) {
+  return failJob("annotation_jobs", jobId, options);
+}
+
+export function failVectorIndexJob(jobId, options) {
+  return failJob("vector_index_jobs", jobId, options);
+}
+
+export function saveCognitiveAnnotation({ memoryId, annotation, model, schemaVersion }) {
+  const database = getDb();
+  database.prepare(`
+    INSERT INTO cognitive_annotations (
+      memory_id, memory_version, annotation_json, model, schema_version, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(memory_id, memory_version, schema_version) DO UPDATE SET
+      annotation_json = excluded.annotation_json, model = excluded.model,
+      created_at = excluded.created_at
+  `).run(memoryId, memoryVersion(memoryId), JSON.stringify(annotation), model,
+    schemaVersion, new Date().toISOString());
+}
+
+export function completeCognitiveAnnotation({
+  memoryId,
+  annotation,
+  activations,
+  mappingVersion,
+  model,
+  schemaVersion,
+  jobId,
+  completedAt,
+}) {
+  return getDb().transaction(() => {
+    saveCognitiveAnnotation({ memoryId, annotation, model, schemaVersion });
+    saveRegionActivations(memoryId, activations, mappingVersion);
+    completeAnnotationJob({ jobId, completedAt });
+  })();
+}
+
+function parseJson(value, fallback) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function backfillLegacySources() {
+  const database = getDb();
+  const rows = database.prepare(`
+    SELECT m.id, m.raw_text, m.source, m.ingestion_date, m.created_at,
+      e.model, e.schema_version
+    FROM memories m
+    LEFT JOIN memory_extractions e ON e.id = (
+      SELECT latest.id FROM memory_extractions latest
+      WHERE latest.memory_id = m.id ORDER BY latest.id DESC LIMIT 1
+    )
+    WHERE NOT EXISTS (
+      SELECT 1 FROM source_memory_links link WHERE link.memory_id = m.id
+    )
+  `).all();
+  const migrate = database.transaction(() => {
+    for (const row of rows) {
+      const sourceId = `legacy:${row.id}`;
+      if (hasColumn("memory_sources", "content")) {
+        database.prepare(`
+          INSERT OR IGNORE INTO memory_sources (
+            id, text, content, source, ingestion_date, extraction_status,
+            extraction_attempts, extraction_model, extraction_schema_version,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, 'import', ?, 'completed', 0, ?, ?, ?, ?)
+        `).run(sourceId, row.raw_text, row.raw_text, row.ingestion_date,
+          row.model || "legacy", row.schema_version || 1, row.created_at, row.created_at);
+      } else {
+        database.prepare(`
+          INSERT OR IGNORE INTO memory_sources (
+            id, text, source, ingestion_date, extraction_status,
+            extraction_attempts, extraction_model, extraction_schema_version,
+            created_at, updated_at
+          ) VALUES (?, ?, 'import', ?, 'completed', 0, ?, ?, ?, ?)
+        `).run(sourceId, row.raw_text, row.ingestion_date, row.model || "legacy",
+          row.schema_version || 1, row.created_at, row.created_at);
+      }
+      database.prepare(`
+        INSERT INTO source_memory_links (
+          source_id, memory_id, action, evidence_json, extraction_model,
+          extraction_schema_version, decision_confidence, decision_reason, created_at
+        ) VALUES (?, ?, 'created', ?, ?, ?, 1, 'Synthetic legacy provenance', ?)
+      `).run(sourceId, row.id, JSON.stringify([{
+        start: 0,
+        end: row.raw_text.length,
+        text: row.raw_text,
+      }]), row.model || "legacy", row.schema_version || 1, row.created_at);
+    }
+  });
+  migrate();
+  return rows.length;
 }
 
 // --- Memory CRUD ---
@@ -1164,6 +1720,7 @@ export function updateMemoryGraph({
           title = ?,
           confidence = ?,
           tags = ?,
+          version = version + 1,
           updated_at = ?
       WHERE id = ?
     `).run(
@@ -1319,7 +1876,10 @@ function persistDerivedMemoryGraph(memoryId, extraction) {
       rel.predicate,
       memoryId,
       rel.confidence,
-      rel.evidence,
+      rel.evidence || (rel.evidenceSpanIndexes || [])
+        .map((index) => extraction.evidenceSpans?.[index]?.text)
+        .filter(Boolean)
+        .join(" … "),
     );
   }
 }
@@ -1917,6 +2477,137 @@ export function getGraphData() {
     nodes: [...memoryNodes, ...entityNodes],
     edges: [...memoryEntityEdges, ...relationshipEdges],
   };
+}
+
+export function auditMemoryIntegrity() {
+  const database = getDb();
+  const findings = [];
+  const memories = database.prepare(`
+    SELECT m.*, e.id AS extraction_id, e.extraction_json, e.schema_version
+    FROM memories m
+    LEFT JOIN memory_extractions e ON e.id = (
+      SELECT latest.id FROM memory_extractions latest
+      WHERE latest.memory_id = m.id ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1
+    )
+    ORDER BY m.id
+  `).all();
+
+  const shapesByVersion = new Map();
+  for (const memory of memories) {
+    const extraction = parseJson(memory.extraction_json, null);
+    if (!extraction) {
+      findings.push({ code: "missing_extraction", memoryId: memory.id });
+      continue;
+    }
+    const shape = extraction.evidenceSpans && extraction.durability
+      ? "semantic_v3_atom"
+      : extraction.memories ? "semantic_collection" : "legacy_atom";
+    const shapes = shapesByVersion.get(memory.schema_version) || new Set();
+    shapes.add(shape);
+    shapesByVersion.set(memory.schema_version, shapes);
+    if (extraction.text && extraction.text !== memory.raw_text) {
+      findings.push({
+        code: "extraction_text_mismatch",
+        memoryId: memory.id,
+        extractionId: memory.extraction_id,
+      });
+    }
+    if (likelyMultiFact(memory.raw_text, extraction)) {
+      findings.push({ code: "likely_multi_fact_atom", memoryId: memory.id });
+    }
+    if (memory.summary && hasNegationMismatch(memory.raw_text, memory.summary)) {
+      findings.push({ code: "possible_summary_contradiction", memoryId: memory.id });
+    }
+  }
+
+  for (const [schemaVersion, shapes] of shapesByVersion) {
+    if (shapes.size > 1) {
+      findings.push({
+        code: "incompatible_schema_shapes",
+        schemaVersion,
+        shapes: [...shapes].sort(),
+      });
+    }
+  }
+
+  const unsupportedRelationships = database.prepare(`
+    SELECT r.id, r.memory_id, r.evidence, m.raw_text,
+      GROUP_CONCAT(s.text, char(0)) AS source_texts
+    FROM relationships r
+    JOIN memories m ON m.id = r.memory_id
+    LEFT JOIN source_memory_links l ON l.memory_id = m.id
+    LEFT JOIN memory_sources s ON s.id = l.source_id
+    GROUP BY r.id
+  `).all().filter((row) => row.evidence
+    && !row.raw_text.includes(row.evidence)
+    && !String(row.source_texts || "").split("\u0000").some(
+      (sourceText) => sourceText.includes(row.evidence),
+    ));
+  for (const relationship of unsupportedRelationships) {
+    findings.push({
+      code: "relationship_evidence_missing",
+      memoryId: relationship.memory_id,
+      relationshipId: relationship.id,
+    });
+  }
+
+  for (const row of database.prepare(`
+    SELECT s.id FROM memory_sources s
+    LEFT JOIN source_memory_links l ON l.source_id = s.id
+    WHERE s.extraction_status = 'completed'
+    GROUP BY s.id HAVING COUNT(l.id) = 0
+  `).all()) {
+    findings.push({ code: "orphaned_source", sourceId: row.id });
+  }
+  for (const row of database.prepare(`
+    SELECT a.id, a.memory_id FROM cognitive_annotations a
+    LEFT JOIN memories m ON m.id = a.memory_id WHERE m.id IS NULL
+  `).all()) {
+    findings.push({
+      code: "orphaned_annotation",
+      annotationId: row.id,
+      memoryId: row.memory_id,
+    });
+  }
+  for (const row of database.prepare(`
+    SELECT m.id, m.version,
+      MAX(CASE WHEN v.status = 'completed' THEN v.memory_version END) AS indexed_version
+    FROM memories m LEFT JOIN vector_index_jobs v ON v.memory_id = m.id
+    GROUP BY m.id
+    HAVING indexed_version IS NULL OR indexed_version < m.version
+  `).all()) {
+    findings.push({
+      code: "missing_or_stale_vector_index",
+      memoryId: row.id,
+      memoryVersion: row.version,
+      indexedVersion: row.indexed_version,
+    });
+  }
+
+  const counts = findings.reduce((result, finding) => {
+    result[finding.code] = (result[finding.code] || 0) + 1;
+    return result;
+  }, {});
+  return {
+    generatedAt: new Date().toISOString(),
+    memoryCount: memories.length,
+    findingCount: findings.length,
+    counts,
+    findings,
+  };
+}
+
+function likelyMultiFact(text, extraction) {
+  if ((String(text).match(/[.!?]+(?:\s+|$)/g) || []).length > 1) return true;
+  const subjects = new Set((extraction.relationships || [])
+    .map((relationship) => String(relationship.subject).toLocaleLowerCase()));
+  return subjects.size > 1 || (/\band\b/i.test(text)
+    && (extraction.relationships || []).length > 1);
+}
+
+function hasNegationMismatch(text, summary) {
+  const negation = (value) => /\b(?:not|never|no longer|doesn't|don't|isn't|wasn't)\b/i.test(value);
+  return negation(text) !== negation(summary);
 }
 
 export function closeDb() {

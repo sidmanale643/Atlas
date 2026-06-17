@@ -84,16 +84,16 @@ export async function run({ positional, flags, deps, json }) {
 
   try {
     await deps.getModel();
-    const { memories } = await deps.ingestionService.ingest({
+    const result = await deps.ingestionService.ingest({
       text: parsed.data.text,
       source: "cli",
       metadata,
     });
 
     if (json) {
-      printJson({ memories });
+      printJson(result);
     } else {
-      console.log(formatAddSummary(memories));
+      console.log(formatAddSummary(result.memories));
     }
     return { exitCode: 0 };
   } catch (error) {

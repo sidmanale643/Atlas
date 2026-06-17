@@ -163,6 +163,7 @@ export function createCognitiveWorker({
   const failJob = optionalFunction(
     db.failAnnotationJob ?? db.markAnnotationJobFailed,
   );
+  const completeAnnotation = optionalFunction(db.completeCognitiveAnnotation);
 
   let timer = null;
   let resolvePoll = null;
@@ -251,6 +252,15 @@ export function createCognitiveWorker({
 
     try {
       const memory = await loadMemory(job);
+      const queuedVersion = job.memoryVersion ?? job.memory_version;
+      if (queuedVersion !== undefined && memory.version !== undefined
+        && Number(queuedVersion) !== Number(memory.version)) {
+        await completeJob.call(db, {
+          jobId: jobId(job),
+          completedAt: currentDate().toISOString(),
+        });
+        return { status: "superseded", job, memory };
+      }
       const semantic = await loadSemantic(job, memory);
       const semanticInput = {
         ...semantic,
@@ -265,23 +275,34 @@ export function createCognitiveWorker({
       }
 
       const id = memoryId(job) ?? memory.id;
-      await saveAnnotation.call(db, {
-        memoryId: id,
-        annotation,
-        model: job.model,
-        schemaVersion: job.schemaVersion ?? job.schema_version,
-        jobId: jobId(job),
-        attempts: attemptCount(job),
-      });
       const activations = mapRegions({
         ...semantic,
         ...annotation,
       });
-      await saveActivations.call(db, id, activations, mappingVersion);
-      await completeJob.call(db, {
-        jobId: jobId(job),
-        completedAt: currentDate().toISOString(),
-      });
+      const completedAt = currentDate().toISOString();
+      if (completeAnnotation) {
+        await completeAnnotation.call(db, {
+          memoryId: id,
+          annotation,
+          activations,
+          mappingVersion,
+          model: job.model,
+          schemaVersion: job.schemaVersion ?? job.schema_version,
+          jobId: jobId(job),
+          completedAt,
+        });
+      } else {
+        await saveAnnotation.call(db, {
+          memoryId: id,
+          annotation,
+          model: job.model,
+          schemaVersion: job.schemaVersion ?? job.schema_version,
+          jobId: jobId(job),
+          attempts: attemptCount(job),
+        });
+        await saveActivations.call(db, id, activations, mappingVersion);
+        await completeJob.call(db, { jobId: jobId(job), completedAt });
+      }
 
       return { status: "completed", job, memory, annotation, activations };
     } catch (error) {
