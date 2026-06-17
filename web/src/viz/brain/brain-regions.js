@@ -16,10 +16,12 @@ const SURFACE_REGION_PROFILES = Object.freeze({
   hippocampusLeft: {
     center: [-0.93, -0.85, 0.8],
     radius: [0.65, 0.6, 0.9],
+    deep: true,
   },
   hippocampusRight: {
     center: [0.93, -0.85, 0.8],
     radius: [0.65, 0.6, 0.9],
+    deep: true,
   },
   prefrontal: {
     center: [0, 0.35, 1.8],
@@ -43,6 +45,7 @@ const SURFACE_REGION_PROFILES = Object.freeze({
     center: [0.62, -0.12, 0.25],
     radius: [0.6, 0.5, 0.55],
     bilateral: true,
+    deep: true,
   },
   cerebellum: {
     center: [0, -1.55, -1.45],
@@ -56,6 +59,7 @@ const SURFACE_REGION_PROFILES = Object.freeze({
     center: [0.82, -0.78, 0.72],
     radius: [0.5, 0.45, 0.6],
     bilateral: true,
+    deep: true,
   },
   insula: {
     center: [1.25, -0.05, 0.45],
@@ -66,6 +70,7 @@ const SURFACE_REGION_PROFILES = Object.freeze({
     center: [1.08, -0.92, 0.18],
     radius: [0.55, 0.45, 0.5],
     bilateral: true,
+    deep: true,
   },
 });
 
@@ -113,6 +118,7 @@ export function getRegionShaderData() {
       center: profile.center,
       radius: profile.radius,
       bilateral: profile.bilateral || false,
+      deep: profile.deep || false,
     };
   });
 }
