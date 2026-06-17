@@ -1,0 +1,256 @@
+/* ============================================================================
+   BrainDiagram — interactive lateral map of the brain's memory regions.
+   Phosphor-blue on black, hairline strokes, region hotspots that light up.
+   ========================================================================== */
+
+.wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: clamp(20px, 4vw, 56px);
+  align-items: center;
+}
+@media (max-width: 920px) {
+  .wrap {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+}
+
+/* ----------------------------------------------------------------- the stage */
+
+.stage {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(120% 100% at 50% 30%, rgba(56, 130, 246, 0.05), transparent 70%),
+    var(--inset);
+  overflow: hidden;
+}
+/* faint scan reticle, echoing the Atlas brain stage */
+.reticle {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--line-soft) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--line-soft) 1px, transparent 1px);
+  background-size: 40px 40px;
+  -webkit-mask-image: radial-gradient(80% 80% at 50% 45%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(80% 80% at 50% 45%, #000 0%, transparent 78%);
+  opacity: 0.5;
+}
+
+.brain {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* ----------------------------------------------------------------- anatomy */
+
+.outline {
+  fill: rgba(56, 130, 246, 0.025);
+  stroke: var(--line-strong);
+  stroke-width: 1.4;
+  filter: drop-shadow(0 0 8px rgba(56, 130, 246, 0.18));
+}
+.sulcus {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.1;
+  opacity: 0.7;
+}
+.gyrus {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+.stem,
+.cerebellum {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.1;
+  opacity: 0.6;
+}
+
+/* ----------------------------------------------------------------- regions */
+
+.region {
+  cursor: pointer;
+  outline: none;
+}
+
+.regionGlow {
+  fill: rgba(56, 130, 246, 0.16);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.regionShape {
+  fill: rgba(56, 130, 246, 0.06);
+  stroke: var(--line-strong);
+  stroke-width: 1.2;
+  transition: fill 0.25s ease, stroke 0.25s ease, opacity 0.25s ease;
+}
+/* deep limbic structures read as dashed — they sit beneath the cortex */
+.regionDeep .regionShape {
+  stroke-dasharray: 4 3;
+}
+.regionDot {
+  fill: var(--green);
+  opacity: 0.7;
+  transition: fill 0.25s ease, opacity 0.25s ease;
+}
+.regionIndex {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  fill: var(--muted);
+  opacity: 0.6;
+  transition: fill 0.25s ease, opacity 0.25s ease;
+}
+
+.region:hover .regionShape,
+.region:focus-visible .regionShape {
+  fill: rgba(56, 130, 246, 0.1);
+  stroke: var(--green);
+}
+.region:focus-visible .regionGlow {
+  opacity: 0.5;
+}
+
+/* selected region — fully lit, gently pulsing */
+.regionOn .regionShape {
+  fill: rgba(56, 130, 246, 0.2);
+  stroke: var(--green-bright);
+  stroke-width: 1.6;
+}
+.regionOn .regionGlow {
+  opacity: 1;
+  animation: bdPulse 2.4s ease-in-out infinite;
+}
+.regionOn .regionDot {
+  fill: var(--green-bright);
+  opacity: 1;
+}
+.regionOn .regionIndex {
+  fill: var(--green-bright);
+  opacity: 1;
+}
+
+@keyframes bdPulse {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.04); }
+}
+/* keep the pulse centered on each hotspot */
+.regionGlow {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* ----------------------------------------------------------------- legend */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.list > li {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.row {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 4px 14px 0;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  transition: padding-left 0.18s ease, background 0.18s ease;
+}
+.row:hover,
+.rowOn .row {
+  background: rgba(56, 130, 246, 0.04);
+  padding-left: 8px;
+}
+.row:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: -1px;
+}
+
+.rowIndex {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--faint);
+  padding-top: 3px;
+  transition: color 0.18s ease;
+}
+.rowOn .rowIndex {
+  color: var(--green);
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.rowHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+.rowHead strong {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--text);
+  transition: color 0.18s ease;
+}
+.rowOn .rowHead strong {
+  color: var(--green-bright);
+}
+.rowType {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* body copy collapses until its region is active */
+.rowBody {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.32s ease, opacity 0.32s ease, margin-top 0.32s ease;
+}
+.rowOn .rowBody {
+  max-height: 240px;
+  opacity: 1;
+  margin-top: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .regionOn .regionGlow {
+    animation: none;
+  }
+  .rowBody {
+    transition: none;
+  }
+}

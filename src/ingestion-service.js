@@ -45,6 +45,49 @@ export function createIngestionService(dependencies) {
     return processSource({ sourceId, text, ingestionDate, source, metadata });
   }
 
+  async function enqueue({
+    text,
+    ingestionDate = new Date().toISOString(),
+    source = "ui",
+    metadata = {},
+    sourceId = randomUUID(),
+  }) {
+    if (typeof dependencies.enqueueIngestionJob !== "function") {
+      throw new Error("Ingestion service is missing required dependency: enqueueIngestionJob");
+    }
+    const existing = dependencies.getMemorySource?.(sourceId);
+    if (existing) {
+      if (existing.text !== text) {
+        throw new Error(`Source ${sourceId} already exists with different text`);
+      }
+      if (existing.extraction_status === "completed") {
+        return completedSourceResult(existing);
+      }
+    } else {
+      dependencies.createMemorySource({
+        id: sourceId,
+        text,
+        source,
+        ingestionDate,
+        metadata,
+      });
+    }
+    dependencies.enqueueIngestionJob({ sourceId });
+    return { sourceId, status: "queued", memories: [] };
+  }
+
+  async function runIngestion(sourceId, { metadata = {} } = {}) {
+    const sourceRecord = dependencies.getMemorySource?.(sourceId);
+    if (!sourceRecord) throw new Error(`Source not found: ${sourceId}`);
+    return processSource({
+      sourceId,
+      text: sourceRecord.text,
+      ingestionDate: sourceRecord.ingestion_date,
+      source: sourceRecord.source,
+      metadata: { ...sourceRecord.metadata_json, ...metadata },
+    });
+  }
+
   async function reprocess(sourceId, { metadata = {} } = {}) {
     const sourceRecord = dependencies.getMemorySource(sourceId, {
       includeRevisions: true,
@@ -276,7 +319,7 @@ export function createIngestionService(dependencies) {
     };
   }
 
-  return { ingest, reprocess };
+  return { ingest, enqueue, runIngestion, reprocess };
 }
 
 async function optionalCanonicalizationContext(text, dependencies) {

@@ -254,6 +254,23 @@ function initSchema() {
       UNIQUE(memory_id, memory_version)
     );
 
+    CREATE TABLE IF NOT EXISTS ingestion_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 5,
+      available_at TEXT NOT NULL,
+      claimed_at TEXT,
+      completed_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (source_id) REFERENCES memory_sources(id) ON DELETE CASCADE,
+      UNIQUE(source_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_extractions_memory ON memory_extractions(memory_id);
     CREATE INDEX IF NOT EXISTS idx_extractions_memory_latest
       ON memory_extractions(memory_id, created_at DESC, id DESC);
@@ -287,6 +304,8 @@ function initSchema() {
       ON annotation_jobs(status, available_at, id);
     CREATE INDEX IF NOT EXISTS idx_vector_jobs_claim
       ON vector_index_jobs(status, available_at, id);
+    CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_claim
+      ON ingestion_jobs(status, available_at, id);
   `);
 
   const memoryColumns = db.prepare("PRAGMA table_info(memories)").all();
@@ -597,6 +616,23 @@ export function enqueueVectorIndexJob({ memoryId, sourceId = null }) {
   `).run(memoryId, sourceId, memoryVersion(memoryId), now, now, now);
 }
 
+export function enqueueIngestionJob({ sourceId }) {
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    INSERT INTO ingestion_jobs (
+      source_id, available_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?)
+    ON CONFLICT(source_id) DO NOTHING
+  `).run(sourceId, now, now, now);
+}
+
+export function getIngestionStatus(sourceId) {
+  return getDb().prepare(`
+    SELECT status FROM ingestion_jobs WHERE source_id = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(sourceId)?.status ?? null;
+}
+
 export function getAnnotationStatus(memoryId) {
   return getDb().prepare(`
     SELECT status FROM annotation_jobs WHERE memory_id = ?
@@ -635,6 +671,10 @@ export function claimVectorIndexJob({ now = new Date().toISOString() } = {}) {
   return claimJob("vector_index_jobs", now);
 }
 
+export function claimIngestionJob({ now = new Date().toISOString() } = {}) {
+  return claimJob("ingestion_jobs", now);
+}
+
 function recoverJobs(table, { now, retryAt = now, staleBefore }) {
   return getDb().prepare(`
     UPDATE ${table} SET status = 'pending', available_at = ?, claimed_at = NULL,
@@ -648,6 +688,10 @@ export function recoverAnnotationJobs(options) {
 
 export function recoverVectorIndexJobs(options) {
   return recoverJobs("vector_index_jobs", options);
+}
+
+export function recoverIngestionJobs(options) {
+  return recoverJobs("ingestion_jobs", options);
 }
 
 function retryJob(table, { jobId, error, retryAt, terminal = false, updatedAt }) {
@@ -665,6 +709,10 @@ export function retryVectorIndexJob(options) {
   return retryJob("vector_index_jobs", options);
 }
 
+export function retryIngestionJob(options) {
+  return retryJob("ingestion_jobs", options);
+}
+
 function completeJob(table, jobId, completedAt) {
   getDb().prepare(`
     UPDATE ${table} SET status = 'completed', completed_at = ?, claimed_at = NULL,
@@ -680,6 +728,10 @@ export function completeVectorIndexJob({ jobId, completedAt }) {
   return completeJob("vector_index_jobs", jobId, completedAt);
 }
 
+export function completeIngestionJob({ jobId, completedAt }) {
+  return completeJob("ingestion_jobs", jobId, completedAt);
+}
+
 function failJob(table, jobId, { error, failedAt }) {
   getDb().prepare(`
     UPDATE ${table} SET status = 'failed', last_error = ?, claimed_at = NULL,
@@ -693,6 +745,10 @@ export function failAnnotationJob(jobId, options) {
 
 export function failVectorIndexJob(jobId, options) {
   return failJob("vector_index_jobs", jobId, options);
+}
+
+export function failIngestionJob(jobId, options) {
+  return failJob("ingestion_jobs", jobId, options);
 }
 
 export function saveCognitiveAnnotation({ memoryId, annotation, model, schemaVersion }) {
