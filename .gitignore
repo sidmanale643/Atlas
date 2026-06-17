@@ -4,7 +4,9 @@ node_modules/
 engram.db
 engram.db-shm
 engram.db-wal
+lancedb/
 *.md
+!README.md
 *.test.js
 tests/
 .claude/
