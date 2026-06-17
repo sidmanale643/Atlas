@@ -1,0 +1,332 @@
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  .hero {
+    background: #0A1628;
+    width: 100%;
+    min-height: 500px;
+    position: relative;
+    overflow: hidden;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+
+  nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 40px;
+    border-bottom: 1px solid rgba(106,176,255,0.12);
+    position: relative;
+    z-index: 10;
+  }
+
+  .logo {
+    font-family: monospace;
+    font-size: 14px;
+    color: #6ab0ff;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .logo-icon {
+    width: 18px; height: 18px;
+    border: 1.5px solid #6ab0ff;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .logo-icon::after {
+    content: '';
+    width: 6px; height: 6px;
+    background: #6ab0ff;
+    border-radius: 50%;
+  }
+
+  .nav-links {
+    display: flex;
+    gap: 32px;
+    list-style: none;
+  }
+
+  .nav-links a {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: rgba(106,176,255,0.55);
+    text-decoration: none;
+  }
+
+  .nav-cta {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: #6ab0ff;
+    border: 1px solid #6ab0ff;
+    padding: 7px 14px;
+    text-decoration: none;
+  }
+
+  canvas {
+    position: absolute;
+    top: 0; right: 0;
+    width: 55%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  .content {
+    position: relative;
+    z-index: 5;
+    padding: 60px 40px 40px;
+    max-width: 55%;
+  }
+
+  .eyebrow {
+    font-family: monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: rgba(106,176,255,0.45);
+    margin-bottom: 24px;
+  }
+
+  h1 {
+    font-size: clamp(38px, 5vw, 58px);
+    font-weight: 400;
+    color: #6ab0ff;
+    line-height: 1.15;
+    margin-bottom: 4px;
+  }
+
+  h1 em {
+    font-style: italic;
+    display: block;
+  }
+
+  .body-text {
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.8;
+    color: rgba(106,176,255,0.5);
+    max-width: 420px;
+    margin: 24px 0 32px;
+  }
+
+  .btns {
+    display: flex;
+    gap: 12px;
+  }
+
+  .btn-primary {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    background: #6ab0ff;
+    color: #0A1628;
+    padding: 10px 20px;
+    border: none;
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  .btn-secondary {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    background: transparent;
+    color: #6ab0ff;
+    padding: 10px 20px;
+    border: 1px solid rgba(106,176,255,0.4);
+    cursor: pointer;
+  }
+
+  .waveform-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    z-index: 5;
+  }
+</style>
+
+<div class="hero" id="hero">
+  <nav>
+    <div class="logo">
+      <div class="logo-icon"></div>
+      Atlas
+    </div>
+    <ul class="nav-links">
+      <li><a href="#">Extraction</a></li>
+      <li><a href="#">Architecture</a></li>
+      <li><a href="#">Connect</a></li>
+      <li><a href="#">Science</a></li>
+    </ul>
+    <a href="#" class="nav-cta">OPEN THE ATLAS</a>
+  </nav>
+
+  <canvas id="neuroCanvas"></canvas>
+
+  <div class="content">
+    <div class="eyebrow">ATLAS · BUILD 2026.06</div>
+    <h1>
+      Neurons that fire<br>together
+      <em>wire together.</em>
+    </h1>
+    <p class="body-text">
+      Add a moment. Atlas breaks it into people, places, time
+      and activity — places it anatomically across the cortex —
+      then draws the associations that make it retrievable. A
+      brain, not a notebook.
+    </p>
+    <div class="btns">
+      <button class="btn-primary">OPEN THE ATLAS →</button>
+      <button class="btn-secondary">SEE HOW IT WORKS</button>
+    </div>
+  </div>
+
+  <svg class="waveform-bar" viewBox="0 0 1440 60" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <polyline id="eegLine" points="" stroke="#6ab0ff" stroke-width="1" fill="none" opacity="0.3"/>
+  </svg>
+</div>
+
+<script>
+const canvas = document.getElementById('neuroCanvas');
+const ctx = canvas.getContext('2d');
+const hero = document.getElementById('hero');
+
+function resize() {
+  canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+  canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+}
+resize();
+window.addEventListener('resize', resize);
+
+const W = () => canvas.offsetWidth;
+const H = () => canvas.offsetHeight;
+const BLUE = '#6ab0ff';
+const BLUE_DIM = 'rgba(106,176,255,';
+
+const NODE_COUNT = 28;
+let nodes = [];
+let pulses = [];
+
+function mkNodes() {
+  nodes = [];
+  for (let i = 0; i < NODE_COUNT; i++) {
+    nodes.push({
+      x: 0.05 + Math.random() * 0.88,
+      y: 0.08 + Math.random() * 0.82,
+      r: 2 + Math.random() * 2.5,
+      glow: 0,
+      glowDecay: 0.012 + Math.random() * 0.01,
+      connections: []
+    });
+  }
+  nodes.forEach((n, i) => {
+    nodes.forEach((m, j) => {
+      if (i === j) return;
+      const dx = (n.x - m.x) * W();
+      const dy = (n.y - m.y) * H();
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < 140 && n.connections.length < 4) n.connections.push(j);
+    });
+  });
+}
+mkNodes();
+
+function firePulse() {
+  const src = Math.floor(Math.random() * nodes.length);
+  const node = nodes[src];
+  if (!node.connections.length) return;
+  const dst = node.connections[Math.floor(Math.random() * node.connections.length)];
+  pulses.push({ src, dst, t: 0, speed: 0.018 + Math.random() * 0.014 });
+  nodes[src].glow = 1;
+}
+
+setInterval(firePulse, 260);
+setInterval(firePulse, 520);
+
+function draw() {
+  ctx.clearRect(0, 0, W(), H());
+  const w = W(), h = H();
+
+  nodes.forEach(n => { if (n.glow > 0) n.glow = Math.max(0, n.glow - n.glowDecay); });
+
+  nodes.forEach((n, i) => {
+    n.connections.forEach(j => {
+      const m = nodes[j];
+      ctx.beginPath();
+      ctx.moveTo(n.x * w, n.y * h);
+      ctx.lineTo(m.x * w, m.y * h);
+      ctx.strokeStyle = BLUE_DIM + '0.07)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    });
+  });
+
+  pulses = pulses.filter(p => p.t <= 1);
+  pulses.forEach(p => {
+    p.t += p.speed;
+    const src = nodes[p.src], dst = nodes[p.dst];
+    const x = src.x * w + (dst.x - src.x) * w * p.t;
+    const y = src.y * h + (dst.y - src.y) * h * p.t;
+
+    const dx = (dst.x - src.x) * w, dy = (dst.y - src.y) * h;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    ctx.beginPath();
+    ctx.moveTo(src.x * w, src.y * h);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = BLUE_DIM + (0.5 * p.t) + ')';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = BLUE;
+    ctx.fill();
+
+    if (p.t >= 1) nodes[p.dst].glow = 1;
+  });
+
+  nodes.forEach(n => {
+    const glow = n.glow;
+    if (glow > 0) {
+      ctx.beginPath();
+      ctx.arc(n.x * w, n.y * h, n.r * 3.5 * glow, 0, Math.PI * 2);
+      ctx.fillStyle = BLUE_DIM + (glow * 0.15) + ')';
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(n.x * w, n.y * h, n.r, 0, Math.PI * 2);
+    ctx.fillStyle = glow > 0.1 ? BLUE : BLUE_DIM + '0.3)';
+    ctx.fill();
+  });
+
+  requestAnimationFrame(draw);
+}
+draw();
+
+const eegLine = document.getElementById('eegLine');
+let eegOffset = 0;
+function animateEEG() {
+  const pts = [];
+  const steps = 120;
+  for (let i = 0; i <= steps; i++) {
+    const x = (i / steps) * 1440;
+    const phase = (i / steps) * Math.PI * 8 + eegOffset;
+    let y = 30 + Math.sin(phase) * 6;
+    if (i % 20 === 10) y -= 22;
+    if (i % 20 === 11) y += 18;
+    if (i % 20 === 12) y -= 10;
+    pts.push(x + ',' + y);
+  }
+  eegLine.setAttribute('points', pts.join(' '));
+  eegOffset += 0.04;
+  requestAnimationFrame(animateEEG);
+}
+animateEEG();
+</script>
