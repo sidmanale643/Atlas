@@ -5,7 +5,7 @@ import {
   printJson,
 } from "../format.js";
 
-const HELP = `Usage: neurogram get <id> [options]
+const HELP = `Usage: atlas get <id> [options]
 
 Fetch one memory by ID with its full extraction (entities, relationships,
 regions).
@@ -23,7 +23,7 @@ export const meta = {
 export async function run({ positional, flags, deps, json }) {
   const [id] = positional;
   if (!id) {
-    printError("get requires a memory ID. Try: neurogram get mem_12ab34cd");
+    printError("get requires a memory ID. Try: atlas get mem_12ab34cd");
     return { exitCode: 2 };
   }
 

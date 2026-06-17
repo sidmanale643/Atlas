@@ -4,10 +4,10 @@ import {
   printJson,
 } from "../format.js";
 
-const HELP = `Usage: neurogram entities <query>
+const HELP = `Usage: atlas entities <query>
 
 Look up canonical entities (people, places, objects, concepts, organizations)
-by partial name. Use the returned numeric ID with \`neurogram entity <id>\` to
+by partial name. Use the returned numeric ID with \`atlas entity <id>\` to
 list every memory linked to it.
 `;
 
@@ -20,7 +20,7 @@ export const meta = {
 export async function run({ positional, flags, deps, json }) {
   const query = positional.join(" ").trim();
   if (!query) {
-    printError("entities requires a query. Try: neurogram entities Maya");
+    printError("entities requires a query. Try: atlas entities Maya");
     return { exitCode: 2 };
   }
 

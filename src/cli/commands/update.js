@@ -5,7 +5,7 @@ import {
   printJson,
 } from "../format.js";
 
-const HELP = `Usage: neurogram update <id> --summary <text>
+const HELP = `Usage: atlas update <id> --summary <text>
 
 Replace the editable summary of an existing memory. The original raw text,
 type, and extraction graph are preserved. The vector embedding is reindexed

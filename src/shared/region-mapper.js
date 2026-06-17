@@ -58,8 +58,44 @@ const MOTOR_ACTION_ACTIVATION = 0.2;
 const PHYSICAL_ACTION_PATTERN =
   /\b(?:climb|climbed|climbing|crawl|crawled|crawling|dance|danced|dancing|drive|drove|driving|exercise|exercised|exercising|grab|grabbed|grabbing|jump|jumped|jumping|kick|kicked|kicking|lift|lifted|lifting|move|moved|moving|play|played|playing|pull|pulled|pulling|push|pushed|pushing|ride|rode|riding|run|ran|running|swim|swam|swimming|throw|threw|throwing|walk|walked|walking|write|wrote|writing)\b/i;
 
+function finiteUnit(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(1, number));
+}
+
+function normalizeSemanticExtraction(extraction = {}) {
+  return {
+    ...extraction,
+    types: Array.isArray(extraction.types) ? extraction.types : [],
+    actions: Array.isArray(extraction.actions) ? extraction.actions : [],
+  };
+}
+
+export function mergeSemanticAndCognitive(semantic = {}, cognitive = {}) {
+  const normalized = normalizeSemanticExtraction(semantic);
+  return {
+    ...normalized,
+    emotions: Array.isArray(cognitive.emotions) ? cognitive.emotions : [],
+    contentCues: Array.isArray(cognitive.contentCues)
+      ? cognitive.contentCues
+      : [],
+    salience: finiteUnit(cognitive.salience),
+  };
+}
+
+function normalizeMappingInput(extraction = {}) {
+  return {
+    ...normalizeSemanticExtraction(extraction),
+    emotions: Array.isArray(extraction.emotions) ? extraction.emotions : [],
+    contentCues: Array.isArray(extraction.contentCues)
+      ? extraction.contentCues
+      : [],
+  };
+}
+
 function addContribution(totals, region, amount) {
-  if (amount > 0) {
+  if (Number.isFinite(amount) && amount > 0) {
     totals.set(region, (totals.get(region) || 0) + amount);
   }
 }
@@ -69,22 +105,27 @@ function maxSignal(items) {
 }
 
 export function getHippocampalLaterality(extraction) {
-  const contentCues = extraction?.contentCues || [];
-  const activeCues = contentCues.filter(
-    ({ weight, confidence }) => weight > 0 && confidence > 0,
+  const normalized = normalizeMappingInput(extraction);
+  const activeCues = normalized.contentCues.filter(
+    ({ weight, confidence }) =>
+      finiteUnit(weight) > 0 && finiteUnit(confidence) > 0,
   );
   const verbalCues = activeCues.filter(({ kind }) => kind === "verbal");
   const spatialCues = activeCues.filter(({ kind }) => kind === "spatial");
   const verbalSignal = maxSignal(
-    verbalCues.map(({ weight, confidence }) => weight * confidence),
+    verbalCues.map(
+      ({ weight, confidence }) => finiteUnit(weight) * finiteUnit(confidence),
+    ),
   );
   const spatialTypeSignal = maxSignal(
-    (extraction?.types || [])
+    normalized.types
       .filter(({ type }) => type === "spatial")
-      .map(({ weight }) => weight),
+      .map(({ weight }) => finiteUnit(weight)),
   );
   const spatialCueSignal = maxSignal(
-    spatialCues.map(({ weight, confidence }) => weight * confidence),
+    spatialCues.map(
+      ({ weight, confidence }) => finiteUnit(weight) * finiteUnit(confidence),
+    ),
   );
   const spatialSignal = Math.max(spatialTypeSignal, spatialCueSignal);
   const bias = Math.max(
@@ -102,10 +143,12 @@ export function getHippocampalLaterality(extraction) {
 }
 
 export function getRegionContributions(extraction) {
+  const normalized = normalizeMappingInput(extraction);
   const contributions = [];
 
-  for (const { type, weight } of extraction.types || []) {
+  for (const { type, weight: rawWeight } of normalized.types) {
     const rule = REGION_RULES[type];
+    const weight = finiteUnit(rawWeight);
     if (!rule || weight <= 0) continue;
 
     for (const [region, regionWeight] of Object.entries(rule)) {
@@ -120,15 +163,19 @@ export function getRegionContributions(extraction) {
     }
   }
 
-  for (const emotion of extraction.emotions || []) {
-    const emotionActivation = emotion.intensity * emotion.arousal;
+  for (const emotion of normalized.emotions) {
+    const intensity = finiteUnit(emotion.intensity);
+    const arousal = finiteUnit(emotion.arousal);
+    const emotionActivation = intensity * arousal;
+    if (emotionActivation <= 0) continue;
+
     for (const [region, regionWeight] of Object.entries(EMOTION_REGION_RULE)) {
       contributions.push({
         region,
         source: "emotion",
         label: emotion.label,
-        intensity: emotion.intensity,
-        arousal: emotion.arousal,
+        intensity,
+        arousal,
         confidence: emotion.confidence,
         ruleWeight: regionWeight,
         amount: emotionActivation * regionWeight,
@@ -136,8 +183,9 @@ export function getRegionContributions(extraction) {
     }
   }
 
-  const physicalAction = (extraction.actions || []).find((action) =>
-    PHYSICAL_ACTION_PATTERN.test(action)
+  const physicalAction = normalized.actions.find(
+    (action) =>
+      typeof action === "string" && PHYSICAL_ACTION_PATTERN.test(action),
   );
   if (physicalAction) {
     contributions.push({
@@ -152,20 +200,21 @@ export function getRegionContributions(extraction) {
 }
 
 export function mapExtractionToRegions(extraction) {
+  const normalized = normalizeMappingInput(extraction);
   const totals = new Map();
 
-  for (const { region, amount } of getRegionContributions(extraction)) {
+  for (const { region, amount } of getRegionContributions(normalized)) {
     addContribution(totals, region, amount);
   }
 
   const significant = [...totals.entries()].filter(
-    ([, weight]) => weight >= MIN_REGION_ACTIVATION
+    ([, weight]) => weight >= MIN_REGION_ACTIVATION,
   );
   const totalWeight = significant.reduce((sum, [, weight]) => sum + weight, 0);
 
   if (totalWeight === 0) return [];
 
-  const laterality = getHippocampalLaterality(extraction);
+  const laterality = getHippocampalLaterality(normalized);
 
   return significant
     .map(([region, weight]) => {
@@ -185,4 +234,14 @@ export function mapExtractionToRegions(extraction) {
       };
     })
     .sort((a, b) => b.weight - a.weight || a.region.localeCompare(b.region));
+}
+
+export function mapSemanticToRegions(semantic) {
+  return mapExtractionToRegions(normalizeSemanticExtraction(semantic));
+}
+
+export function mapSemanticAndCognitiveToRegions(semantic, cognitive) {
+  return mapExtractionToRegions(
+    mergeSemanticAndCognitive(semantic, cognitive),
+  );
 }

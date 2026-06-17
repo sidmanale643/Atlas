@@ -8,7 +8,7 @@ export const EMBEDDING_DIMENSIONS = Number.parseInt(
   10,
 );
 export const QDRANT_COLLECTION =
-  process.env.QDRANT_COLLECTION || "neurogram_memories";
+  process.env.QDRANT_COLLECTION || "atlas_memories";
 
 let embedderPromise;
 let defaultStore;

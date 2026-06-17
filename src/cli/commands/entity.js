@@ -5,10 +5,10 @@ import {
   printJson,
 } from "../format.js";
 
-const HELP = `Usage: neurogram entity <id>
+const HELP = `Usage: atlas entity <id>
 
 List every memory linked to a specific entity. Pass the numeric entity ID
-returned by \`neurogram entities <query>\`.
+returned by \`atlas entities <query>\`.
 
 Options:
   --json    Emit the raw memory array.

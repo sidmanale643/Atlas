@@ -5,7 +5,7 @@ import {
   printJson,
 } from "../format.js";
 
-const HELP = `Usage: neurogram list [options]
+const HELP = `Usage: atlas list [options]
 
 List recently stored memories, newest first.
 

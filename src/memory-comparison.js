@@ -283,7 +283,7 @@ function buildActivationAnalysis(leftExtraction, rightExtraction, regions) {
     notes: [
       "Region percentages are normalized within each memory, so a stronger signal in one area can reduce another area's relative share even when its raw mapped signal is unchanged.",
       "Emotion mapping uses extracted emotional type weight plus intensity and arousal. Positive or negative valence does not by itself select a different region.",
-      "These values explain Neurogram's mapping heuristic; they are not measured neural activity or literal storage locations.",
+      "These values explain Atlas's mapping heuristic; they are not measured neural activity or literal storage locations.",
     ],
   };
 }

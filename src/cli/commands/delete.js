@@ -4,7 +4,7 @@ import {
   printJson,
 } from "../format.js";
 
-const HELP = `Usage: neurogram delete <id> [--yes]
+const HELP = `Usage: atlas delete <id> [--yes]
 
 Permanently delete a memory and its vector. Prompts for confirmation on a
 TTY; use --yes to skip the prompt (recommended for scripts).

@@ -1,12 +1,17 @@
 import { z } from "zod";
 
-export const EXTRACTION_SCHEMA_VERSION = 2;
+export const SEMANTIC_EXTRACTION_SCHEMA_VERSION = 2;
+export const COGNITIVE_ANNOTATION_SCHEMA_VERSION = 1;
+export const SEMANTIC_SCHEMA_VERSION = SEMANTIC_EXTRACTION_SCHEMA_VERSION;
+export const COGNITIVE_SCHEMA_VERSION = COGNITIVE_ANNOTATION_SCHEMA_VERSION;
+// Backward-compatible name used by the existing persistence layer.
+export const EXTRACTION_SCHEMA_VERSION = SEMANTIC_EXTRACTION_SCHEMA_VERSION;
 export const MEMORY_COMPARISON_SCHEMA_VERSION = 1;
 
 // --- Request Schemas ---
 
 export const MemoryRequest = z.object({
-  text: z.string().min(1, "text is required").max(180, "text must be 180 characters or fewer"),
+  text: z.string().min(1, "text is required").max(2000, "text must be 2000 characters or fewer"),
   ingestionDate: z.string().datetime().optional(),
 });
 
@@ -14,8 +19,8 @@ export const AddMemorySchema = z.object({
   text: z
     .string()
     .min(1, "text is required")
-    .max(180, "text must be 180 characters or fewer")
-    .describe("The memory text to extract and store"),
+    .max(2000, "text must be 2000 characters or fewer")
+    .describe("Conversational text containing one or more durable memories"),
   type: z
     .enum([
       "relationship",
@@ -28,12 +33,12 @@ export const AddMemorySchema = z.object({
       "observation",
       "error",
     ])
-    .describe("Memory classification"),
+    .describe("Fallback classification for the submitted source"),
   title: z
     .string()
     .min(1, "title is required")
     .max(50, "title must be 50 characters or fewer")
-    .describe("The first 50 characters of the memory"),
+    .describe("Fallback title for the submitted source"),
   confidence: z
     .number()
     .min(0)
@@ -108,9 +113,48 @@ export const RelationshipSchema = z.object({
   evidence: z.string(),
 });
 
+const WeightedMemoryTypesSchema = z.array(MemoryTypeSchema).superRefine(
+  (types, ctx) => {
+    const totalWeight = types.reduce((sum, type) => sum + type.weight, 0);
+    if (totalWeight > 1.0001) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Type weights sum to ${totalWeight.toFixed(3)}, which exceeds 1.0`,
+      });
+    }
+  },
+);
+
+export const AtomicMemorySchema = z.object({
+  text: z.string().trim().min(1),
+  summary: z.string().trim().min(1),
+  types: WeightedMemoryTypesSchema,
+  occurredAt: OccurredAtSchema,
+  entities: z.array(EntitySchema),
+  relationships: z.array(RelationshipSchema),
+  actions: z.array(z.string().min(1)),
+  topics: z.array(z.string().min(1)),
+}).strict();
+
+export const SemanticExtractionSchema = z.object({
+  memories: z.array(AtomicMemorySchema),
+}).strict();
+
+export const SemanticExtractionJsonSchema =
+  SemanticExtractionSchema.toJSONSchema();
+
+export const CognitiveAnnotationSchema = z.object({
+  emotions: z.array(EmotionSchema),
+  salience: z.number().min(0).max(1),
+  contentCues: z.array(ContentCueSchema),
+}).strict();
+
+export const CognitiveAnnotationJsonSchema =
+  CognitiveAnnotationSchema.toJSONSchema();
+
 export const ExtractionSchema = z.object({
   occurredAt: OccurredAtSchema,
-  types: z.array(MemoryTypeSchema),
+  types: WeightedMemoryTypesSchema,
   emotions: z.array(EmotionSchema),
   entities: z.array(EntitySchema),
   relationships: z.array(RelationshipSchema),
@@ -119,15 +163,6 @@ export const ExtractionSchema = z.object({
   contentCues: z.array(ContentCueSchema),
   salience: z.number().min(0).max(1),
   summary: z.string(),
-}).superRefine((data, ctx) => {
-  const totalWeight = data.types.reduce((sum, t) => sum + t.weight, 0);
-  if (totalWeight > 1.0001) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `Type weights sum to ${totalWeight.toFixed(3)}, which exceeds 1.0`,
-      path: ["types"],
-    });
-  }
 });
 
 export const ExtractionJsonSchema = ExtractionSchema.toJSONSchema();

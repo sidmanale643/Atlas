@@ -5,7 +5,7 @@ import {
   printJson,
 } from "../format.js";
 
-const HELP = `Usage: neurogram related <id> [options]
+const HELP = `Usage: atlas related <id> [options]
 
 Find memories connected to <id> through shared entities, relationships,
 semantic similarity, and BM25 keyword matches.

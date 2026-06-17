@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "path";
 import { pathToFileURL } from "url";
 import { randomUUID } from "crypto";
 import { existsSync } from "fs";
-import { compareMemories, extractMemory } from "./llm.js";
+import { compareMemories, decideMemoryWrite, extractAtomicMemories, extractMemory } from "./llm.js";
 import { model } from "./llm-config.js";
 import {
   MEMORY_COMPARISON_SCHEMA_VERSION,
@@ -18,6 +18,7 @@ import {
   hashMemoryComparisonInput,
 } from "./memory-comparison.js";
 import { getRelatedMemories as deriveRelatedMemories } from "./related-memories.js";
+import { retrieveExtractionContext } from "./extraction-context.js";
 import createLogger from "./logger.js";
 import {
   deleteAllMemoryVectors,
@@ -53,6 +54,7 @@ import {
   resolveEntityResolutionSuggestion,
   searchMemoriesFts,
   deleteAllMemories,
+  deleteAllEntities,
   deleteMemory,
 } from "./db.js";
 
@@ -70,10 +72,13 @@ const hasSpa = existsSync(spaIndex);
 const defaultDependencies = {
   backfillRegionActivations,
   compareMemories,
+  decideMemoryWrite,
   deleteAllMemoryVectors,
   deleteAllMemories,
+  deleteAllEntities,
   deleteMemoryVector,
   deleteMemory,
+  extractAtomicMemories,
   extractMemory,
   findEntities,
   getDb,
@@ -103,7 +108,7 @@ const defaultDependencies = {
   updateMemorySummary,
 };
 
-export function createNeurogramApp(overrides = {}) {
+export function createAtlasApp(overrides = {}) {
   const dependencies = { ...defaultDependencies, ...overrides };
   const app = express();
 
@@ -140,35 +145,114 @@ export function createNeurogramApp(overrides = {}) {
     }
 
     const { text, ingestionDate } = parsed.data;
-    const id = `mem_${randomUUID().slice(0, 8)}`;
     const date = ingestionDate || new Date().toISOString();
 
     try {
-      const extraction = await dependencies.extractMemory(text, date);
-      const memory = dependencies.storeMemory(
-        id,
+      let similarMemories = [];
+      try {
+        similarMemories = await retrieveExtractionContext(text, dependencies);
+      } catch {
+        // Context retrieval is optional enrichment
+      }
+
+      const semanticExtraction = await dependencies.extractAtomicMemories(
         text,
         date,
-        extraction,
-        dependencies.model,
-        "ui",
+        similarMemories,
       );
-      await syncVectorIndex(
-        () => dependencies.indexMemoryVector(memory),
-        { action: "index", id },
-      );
-      const response = serializeMemory(memory, dependencies, {
-        extraction,
-        includeRelationships: true,
-      });
 
-      log.info("memory stored", {
-        id,
-        types: extraction.types.map((item) => item.type),
+      const memories = [];
+      for (const atom of semanticExtraction.memories) {
+        const id = `mem_${randomUUID().slice(0, 8)}`;
+
+        let candidates;
+        try {
+          const hits = await dependencies.searchMemoryVectors(atom.text, { limit: 5 });
+          candidates = hits
+            .map(({ id: hitId }) => dependencies.getMemory(hitId))
+            .filter(Boolean);
+        } catch {
+          candidates = [];
+        }
+
+        let action = "created";
+        let matchedMemoryId = null;
+
+        if (candidates.length > 0) {
+          try {
+            const decision = await dependencies.decideMemoryWrite(
+              { text: atom.text, summary: atom.summary },
+              candidates,
+            );
+            if (decision.action !== "create") {
+              const validMatch = candidates.some(
+                ({ id: cid }) => cid === decision.matchedMemoryId,
+              );
+              if (validMatch && decision.confidence >= 0.85) {
+                action = decision.action === "unchanged" ? "unchanged" : "updated";
+                matchedMemoryId = decision.matchedMemoryId;
+
+                if (action === "updated") {
+                  dependencies.updateMemorySummary(matchedMemoryId, atom.summary);
+                  const existing = dependencies.getMemory(matchedMemoryId);
+                  if (existing) {
+                    await syncVectorIndex(
+                      () => dependencies.indexMemoryVector(existing),
+                      { action: "reindex", id: matchedMemoryId },
+                    );
+                    memories.push(
+                      serializeMemory(existing, dependencies, {
+                        extraction: atom,
+                        includeRelationships: true,
+                      }),
+                    );
+                  }
+                  continue;
+                }
+                // unchanged
+                const existing = dependencies.getMemory(matchedMemoryId);
+                if (existing) {
+                  memories.push(
+                    serializeMemory(existing, dependencies, {
+                      extraction: atom,
+                      includeRelationships: true,
+                    }),
+                  );
+                }
+                continue;
+              }
+            }
+          } catch {
+            // Fall through to create
+          }
+        }
+
+        const memory = dependencies.storeMemory(
+          id,
+          atom.text,
+          date,
+          atom,
+          dependencies.model,
+          "ui",
+        );
+        await syncVectorIndex(
+          () => dependencies.indexMemoryVector(memory),
+          { action: "index", id },
+        );
+        memories.push(
+          serializeMemory(memory, dependencies, {
+            extraction: atom,
+            includeRelationships: true,
+          }),
+        );
+      }
+
+      log.info("memories stored", {
+        count: memories.length,
       });
-      res.status(201).json(response);
+      res.status(201).json({ memories });
     } catch (error) {
-      log.error("extraction failed", { id, error: error.message });
+      log.error("extraction failed", { error: error.message });
       res.status(502).json({
         error: "Extraction failed",
         detail: error.message,
@@ -188,7 +272,7 @@ export function createNeurogramApp(overrides = {}) {
     const parsed = parseCatalogQuery(req.query, {
       defaultSort: "created_at",
       defaultOrder: "desc",
-      sorts: ["title", "type", "source", "confidence", "created_at"],
+      sorts: ["title", "type", "source", "confidence", "created_at", "linked"],
       filters: {
         source: ["ui", "mcp"],
         type: null,
@@ -446,6 +530,12 @@ export function createNeurogramApp(overrides = {}) {
     const q = req.query.q;
     if (!q) return res.status(400).json({ error: "q query param required" });
     res.json(dependencies.findEntities(q));
+  });
+
+  app.delete("/api/entities", async (_req, res) => {
+    dependencies.deleteAllEntities();
+    log.info("all entities deleted");
+    res.json({ ok: true });
   });
 
   app.get("/api/graph", (_req, res) => {
@@ -736,8 +826,8 @@ function comparisonResponse({
   };
 }
 
-export function startNeurogramServer(port = PORT) {
-  const app = createNeurogramApp();
+export function startAtlasServer(port = PORT) {
+  const app = createAtlasApp();
   return app.listen(port, () => {
     log.info("server started", { port, url: `http://localhost:${port}` });
   });
@@ -747,4 +837,4 @@ const isMainModule =
   process.argv[1] &&
   import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 
-if (isMainModule) startNeurogramServer();
+if (isMainModule) startAtlasServer();

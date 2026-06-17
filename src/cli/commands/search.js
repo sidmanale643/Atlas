@@ -5,7 +5,7 @@ import {
   printJson,
 } from "../format.js";
 
-const HELP = `Usage: neurogram search <query> [options]
+const HELP = `Usage: atlas search <query> [options]
 
 Find memories using hybrid search (semantic + keyword).
 
@@ -27,7 +27,7 @@ const STRATEGIES = new Set(["hybrid", "vector", "bm25"]);
 export async function run({ positional, flags, deps, json }) {
   const query = positional.join(" ").trim();
   if (!query) {
-    printError("search requires a query. Try: neurogram search \"coffee preference\"");
+    printError("search requires a query. Try: atlas search \"coffee preference\"");
     return { exitCode: 2 };
   }
   const limit = Number.isFinite(flags.limit) ? flags.limit : 20;

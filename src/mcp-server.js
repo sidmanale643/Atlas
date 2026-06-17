@@ -22,8 +22,10 @@ import {
   updateMemoryGraph,
   updateMemorySummary,
 } from "./db.js";
+import { extractAtomicMemories } from "./llm.js";
 import { getRelatedMemories as deriveRelatedMemories } from "./related-memories.js";
 import { AddMemorySchema } from "./schemas.js";
+import { retrieveExtractionContext } from "./extraction-context.js";
 import {
   deleteMemoryVector,
   hybridSearchMemories,
@@ -36,14 +38,16 @@ process.env.LOG_STREAM = "stderr";
 const memoryIdSchema = z
   .string()
   .min(1)
-  .describe("Neurogram memory ID, for example mem_12ab34cd");
+  .describe("Atlas memory ID, for example mem_12ab34cd");
 
 const memoryWriteResultSchema = {
-  action: z.enum(["created", "updated", "unchanged"]),
-  memory: z.object({ id: memoryIdSchema }).passthrough(),
-  matchedMemoryId: memoryIdSchema.nullable(),
-  confidence: z.number().min(0).max(1),
-  reason: z.string().min(1),
+  memories: z.array(z.object({
+    action: z.enum(["created", "updated", "unchanged"]),
+    memory: z.object({ id: memoryIdSchema }).passthrough(),
+    matchedMemoryId: memoryIdSchema.nullable(),
+    confidence: z.number().min(0).max(1),
+    reason: z.string().min(1),
+  })),
 };
 
 function toolResult(data) {
@@ -68,9 +72,9 @@ function defaultDependencies() {
       const module = await import("./llm.js");
       return module.decideMemoryWrite(...args);
     },
-    extractMemory: async (...args) => {
+    extractAtomicMemories: async (...args) => {
       const module = await import("./llm.js");
-      return module.extractMemory(...args);
+      return module.extractAtomicMemories(...args);
     },
     findEntities,
     getEntitiesForMemory,
@@ -114,10 +118,10 @@ function defaultDependencies() {
   return dependencies;
 }
 
-export function createNeurogramMcpServer(overrides = {}) {
+export function createAtlasMcpServer(overrides = {}) {
   const dependencies = { ...defaultDependencies(), ...overrides };
   const server = new McpServer({
-    name: "Neurogram",
+    name: "Atlas",
     version: "0.1.0",
   });
 
@@ -139,7 +143,7 @@ export function createNeurogramMcpServer(overrides = {}) {
     {
       title: "Add memory",
       description:
-        "Save a NEW personal memory to Neurogram. The system then either creates, updates, or leaves an equivalent memory unchanged based on similarity. Use this whenever the user states a durable preference, fact, decision, learning, event, relationship detail, instruction, observation, or error worth remembering across sessions. Provide one short, atomic statement (max 180 chars) plus a `type`, a short `title` (max 50 chars), an optional confidence in 0-1 (default 0.6), and optional tags. The tool extracts entities, relationships, brain regions, and embeddings, then returns `action: 'created' | 'updated' | 'unchanged'` with the resulting memory. Do NOT use this for ephemeral chit-chat, transient state, secrets, or anything already covered by a recent `search_memories` / `list_memories` result. Requires the configured LLM API key.",
+        "Save a NEW personal memory to Atlas. The system then either creates, updates, or leaves an equivalent memory unchanged based on similarity. Use this whenever the user states a durable preference, fact, decision, learning, event, relationship detail, instruction, observation, or error worth remembering across sessions. Provide one or more durable memories as conversational text (max 2000 chars) plus a `type`, a short `title` (max 50 chars), an optional confidence in 0-1 (default 0.6), and optional tags. The text is automatically split into atomic memories, each extracted with entities, relationships, brain regions, and embeddings. Returns an array of results with `action: 'created' | 'updated' | 'unchanged'` for each atomic memory. Do NOT use this for ephemeral chit-chat, transient state, secrets, or anything already covered by a recent `search_memories` / `list_memories` result. Requires the configured LLM API key.",
       inputSchema: AddMemorySchema.shape,
       outputSchema: memoryWriteResultSchema,
       annotations: {
@@ -150,81 +154,105 @@ export function createNeurogramMcpServer(overrides = {}) {
       },
     },
     async ({ text, type, title, confidence, tags }) => {
-      const id = `mem_${randomUUID().slice(0, 8)}`;
       const date = new Date().toISOString();
+      const metadata = { type, title, confidence, tags };
 
       try {
-        const extraction = await dependencies.extractMemory(text, date);
-        const extractionModel = await dependencies.getModel();
-        const metadata = { type, title, confidence, tags };
-        const decision = await decideSmartMemoryWrite({
-          dependencies,
-          getMemoryDetails,
-          text,
-          extraction,
-          metadata,
-        });
-
-        if (decision.action === "unchanged") {
-          return toolResult({
-            action: "unchanged",
-            memory: getMemoryDetails(decision.matchedMemoryId),
-            matchedMemoryId: decision.matchedMemoryId,
-            confidence: decision.confidence,
-            reason: decision.reason,
-          });
+        let similarMemories = [];
+        try {
+          similarMemories = await retrieveExtractionContext(text, dependencies);
+        } catch {
+          // Context retrieval is optional enrichment
         }
 
-        if (decision.action === "update") {
-          const replacementText = decision.replacementText?.trim() || text;
-          const replacementExtraction = replacementText === text
-            ? extraction
-            : await dependencies.extractMemory(replacementText, date);
-          const result = dependencies.updateMemoryGraph({
-            memoryId: decision.matchedMemoryId,
-            rawText: replacementText,
-            ingestionDate: date,
-            extraction: replacementExtraction,
-            model: extractionModel,
-            metadata,
-          });
-          try {
-            await dependencies.indexMemoryVector(result.memory);
-          } catch (error) {
-            console.error(
-              `Could not reindex memory ${decision.matchedMemoryId}: ${error.message}`,
-            );
-          }
-          return toolResult({
-            action: "updated",
-            memory: getMemoryDetails(decision.matchedMemoryId),
-            matchedMemoryId: decision.matchedMemoryId,
-            confidence: decision.confidence,
-            reason: decision.reason,
-          });
-        }
-
-        const memory = dependencies.storeMemory(
-          id,
+        const semanticExtraction = await dependencies.extractAtomicMemories(
           text,
           date,
-          extraction,
-          extractionModel,
-          "mcp",
-          metadata,
+          similarMemories,
         );
-        try {
-          await dependencies.indexMemoryVector(memory);
-        } catch (error) {
-          console.error(`Could not index memory ${id}: ${error.message}`);
+
+        const results = [];
+        for (const atom of semanticExtraction.memories) {
+          const id = `mem_${randomUUID().slice(0, 8)}`;
+          const atomMetadata = {
+            ...metadata,
+            type: metadata.type || dominantType(atom.types),
+            title: metadata.title || atom.summary || atom.text.slice(0, 50),
+          };
+
+          const decision = await decideSmartMemoryWrite({
+            dependencies,
+            getMemoryDetails,
+            text: atom.text,
+            extraction: atom,
+            metadata: atomMetadata,
+          });
+
+          let memory;
+          if (decision.action === "unchanged") {
+            memory = getMemoryDetails(decision.matchedMemoryId);
+          } else if (decision.action === "update") {
+            const replacementText = decision.replacementText?.trim() || atom.text;
+            let replacementExtraction;
+            if (replacementText === atom.text) {
+              replacementExtraction = atom;
+            } else {
+              let replacementContext = [];
+              try {
+                replacementContext = await retrieveExtractionContext(replacementText, dependencies);
+              } catch {
+                // Context retrieval is optional
+              }
+              const replacementResult = await dependencies.extractAtomicMemories(replacementText, date, replacementContext);
+              if (!replacementResult.memories.length) {
+                throw new Error("Replacement text did not produce a valid memory extraction");
+              }
+              replacementExtraction = replacementResult.memories[0];
+            }
+            dependencies.updateMemoryGraph({
+              memoryId: decision.matchedMemoryId,
+              rawText: replacementText,
+              ingestionDate: date,
+              extraction: replacementExtraction,
+              model: await dependencies.getModel(),
+              metadata: atomMetadata,
+            });
+            memory = getMemoryDetails(decision.matchedMemoryId);
+            try {
+              await dependencies.indexMemoryVector(memory);
+            } catch (error) {
+              console.error(
+                `Could not reindex memory ${decision.matchedMemoryId}: ${error.message}`,
+              );
+            }
+          } else {
+            memory = dependencies.storeMemory(
+              id,
+              atom.text,
+              date,
+              atom,
+              await dependencies.getModel(),
+              "mcp",
+              atomMetadata,
+            );
+            try {
+              await dependencies.indexMemoryVector(memory);
+            } catch (error) {
+              console.error(`Could not index memory ${id}: ${error.message}`);
+            }
+          }
+
+          results.push({
+            action: decision.action === "create" ? "created" : decision.action,
+            memory: getMemoryDetails(memory.id),
+            matchedMemoryId:
+              decision.action === "create" ? null : decision.matchedMemoryId,
+            confidence: decision.confidence,
+            reason: decision.reason,
+          });
         }
-        return toolResult({
-          action: "created",
-          memory: getMemoryDetails(id),
-          matchedMemoryId: null,
-          confidence: decision.confidence,
-          reason: decision.reason,
-        });
+
+        return toolResult({ memories: results });
       } catch (error) {
         return toolError(`Could not add memory: ${error.message}`);
       }
@@ -236,7 +264,7 @@ export function createNeurogramMcpServer(overrides = {}) {
     {
       title: "List memories",
       description:
-        "Browse Neurogram's most recently stored memories in insertion order (newest first). Use this for a quick scan of what is already known, to enumerate memories by page, or when `search_memories` returns nothing and the user wants to see what exists. Supports `limit` (1-100, default 20) and `offset` (>=0, default 0) for pagination. Prefer `search_memories` when you need semantically relevant results for a question, and `find_entities` / `get_entity_memories` when you want everything about a specific person, place, or concept.",
+        "Browse Atlas's most recently stored memories in insertion order (newest first). Use this for a quick scan of what is already known, to enumerate memories by page, or when `search_memories` returns nothing and the user wants to see what exists. Supports `limit` (1-100, default 20) and `offset` (>=0, default 0) for pagination. Prefer `search_memories` when you need semantically relevant results for a question, and `find_entities` / `get_entity_memories` when you want everything about a specific person, place, or concept.",
       inputSchema: {
         limit: z
           .number()
@@ -263,13 +291,13 @@ export function createNeurogramMcpServer(overrides = {}) {
     {
       title: "Get memory",
       description:
-        "Fetch ONE Neurogram memory by its ID and return its full record: raw text, summary, type, title, confidence, tags, timestamps, the LLM extraction (entities, relationships, emotions, topics, brain-region activations), and any linked entities/relationships. Use this when you already have a memory ID from `add_memory`, `search_memories`, `list_memories`, or `get_related_memories` and need the complete payload. Returns an error if the ID does not exist. Do NOT use this to discover memories - call `search_memories` or `list_memories` first.",
+        "Fetch ONE Atlas memory by its ID and return its full record: raw text, summary, type, title, confidence, tags, timestamps, the LLM extraction (entities, relationships, emotions, topics, brain-region activations), and any linked entities/relationships. Use this when you already have a memory ID from `add_memory`, `search_memories`, `list_memories`, or `get_related_memories` and need the complete payload. Returns an error if the ID does not exist. Do NOT use this to discover memories - call `search_memories` or `list_memories` first.",
       inputSchema: {
         id: z
           .string()
           .min(1)
           .describe(
-            "Neurogram memory ID returned by add_memory, search_memories, list_memories, or get_related_memories, for example mem_12ab34cd"
+            "Atlas memory ID returned by add_memory, search_memories, list_memories, or get_related_memories, for example mem_12ab34cd"
           ),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -389,7 +417,7 @@ export function createNeurogramMcpServer(overrides = {}) {
     {
       title: "Find entities",
       description:
-        "Look up canonical entities (people, places, objects, concepts, or organizations) that Neurogram has extracted from memories. Use this when the user mentions a person, place, or topic by name and you want to confirm Neurogram knows about them and retrieve their numeric `entityId`. Provide a partial name and review the matches. After finding the entity, call `get_entity_memories` with the returned `entityId` to list every memory linked to it. This is a name lookup against the entity graph - use `search_memories` for free-text semantic recall.",
+        "Look up canonical entities (people, places, objects, concepts, or organizations) that Atlas has extracted from memories. Use this when the user mentions a person, place, or topic by name and you want to confirm Atlas knows about them and retrieve their numeric `entityId`. Provide a partial name and review the matches. After finding the entity, call `get_entity_memories` with the returned `entityId` to list every memory linked to it. This is a name lookup against the entity graph - use `search_memories` for free-text semantic recall.",
       inputSchema: {
         query: z
           .string()
@@ -409,7 +437,7 @@ export function createNeurogramMcpServer(overrides = {}) {
     {
       title: "Get entity memories",
       description:
-        "List every memory linked to a specific Neurogram entity (person, place, object, concept, or organization). Use this AFTER `find_entities` returns an `entityId` to retrieve the full history of memories about that entity. Useful for 'tell me everything we know about X' or 'what has the user said about Y'. Do NOT pass a free-text name - resolve it through `find_entities` first to obtain the numeric `entityId`.",
+        "List every memory linked to a specific Atlas entity (person, place, object, concept, or organization). Use this AFTER `find_entities` returns an `entityId` to retrieve the full history of memories about that entity. Useful for 'tell me everything we know about X' or 'what has the user said about Y'. Do NOT pass a free-text name - resolve it through `find_entities` first to obtain the numeric `entityId`.",
       inputSchema: {
         entityId: z
           .number()
@@ -439,7 +467,7 @@ export function createNeurogramMcpServer(overrides = {}) {
           .string()
           .min(1)
           .describe(
-            "Neurogram memory ID to update, for example mem_12ab34cd"
+            "Atlas memory ID to update, for example mem_12ab34cd"
           ),
         summary: z
           .string()
@@ -473,13 +501,13 @@ export function createNeurogramMcpServer(overrides = {}) {
     {
       title: "Delete memory",
       description:
-        "PERMANENTLY delete one Neurogram memory, its extraction data, and its Qdrant vector. This is destructive and cannot be undone. Use this ONLY when the user explicitly asks to forget, remove, or delete a specific memory, or when correcting a test/dev record. Confirm with the user first when in doubt. Returns an error if the ID does not exist. To revise the underlying text or facts, prefer `add_memory` (which may return `action: \"updated\"`) so the original memory ID and revision history are preserved.",
+        "PERMANENTLY delete one Atlas memory, its extraction data, and its Qdrant vector. This is destructive and cannot be undone. Use this ONLY when the user explicitly asks to forget, remove, or delete a specific memory, or when correcting a test/dev record. Confirm with the user first when in doubt. Returns an error if the ID does not exist. To revise the underlying text or facts, prefer `add_memory` (which may return `action: \"updated\"`) so the original memory ID and revision history are preserved.",
       inputSchema: {
         id: z
           .string()
           .min(1)
           .describe(
-            "Neurogram memory ID to permanently delete, for example mem_12ab34cd"
+            "Atlas memory ID to permanently delete, for example mem_12ab34cd"
           ),
       },
       annotations: {
@@ -561,11 +589,18 @@ function createDecision(reason, confidence = 0) {
   };
 }
 
-export async function runNeurogramMcpServer() {
-  const server = createNeurogramMcpServer();
+function dominantType(types = []) {
+  return [...types].sort(
+    (left, right) =>
+      right.weight - left.weight || left.type.localeCompare(right.type),
+  )[0]?.type || "semantic";
+}
+
+export async function runAtlasMcpServer() {
+  const server = createAtlasMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Neurogram MCP server running on stdio");
+  console.error("Atlas MCP server running on stdio");
 }
 
 const isMain =
@@ -573,8 +608,8 @@ const isMain =
   import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
-  runNeurogramMcpServer().catch((error) => {
-    console.error("Neurogram MCP server failed:", error);
+  runAtlasMcpServer().catch((error) => {
+    console.error("Atlas MCP server failed:", error);
     process.exit(1);
   });
 }

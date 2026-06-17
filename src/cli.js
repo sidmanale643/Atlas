@@ -41,7 +41,7 @@ function loadVersion() {
         const pkg = JSON.parse(
           readFileSync(resolve(dir, "package.json"), "utf8"),
         );
-        if (pkg.name === "neurogram") return pkg.version;
+        if (pkg.name === "atlas-mcp") return pkg.version;
       } catch {
         // keep climbing
       }
@@ -57,12 +57,12 @@ function loadVersion() {
 
 const VERSION = loadVersion();
 
-const TOP_HELP = `neurogram ${VERSION}
+const TOP_HELP = `atlas ${VERSION}
 
-Store, recall, and inspect memories from the terminal. Mirrors the Neurogram
+Store, recall, and inspect memories from the terminal. Mirrors the Atlas
 MCP tools; uses the same data store and LLM pipeline as the web app.
 
-Usage: neurogram <command> [args] [flags]
+Usage: atlas <command> [args] [flags]
 
 Commands:
   add <text>            Save a new memory (runs the LLM extraction pipeline)
@@ -76,19 +76,19 @@ Commands:
   delete <id>           Permanently delete a memory
 
 Global flags:
-  --help, -h            Show this help (or per-command help: neurogram <cmd> --help)
+  --help, -h            Show this help (or per-command help: atlas <cmd> --help)
   --version, -v         Print the version
 
 Examples:
-  neurogram add "I prefer dark roast coffee" --type preference --title "Coffee" --json
-  neurogram search "coffee" --strategy hybrid --json
-  neurogram get mem_12ab34cd --json | jq .extraction
-  neurogram delete mem_12ab34cd --yes
+  atlas add "I prefer dark roast coffee" --type preference --title "Coffee" --json
+  atlas search "coffee" --strategy hybrid --json
+  atlas get mem_12ab34cd --json | jq .extraction
+  atlas delete mem_12ab34cd --yes
 `;
 
 function printUsageError(message) {
   console.error(`Error: ${message}\n`);
-  console.error(`Run 'neurogram --help' for a list of commands.`);
+  console.error(`Run 'atlas --help' for a list of commands.`);
 }
 
 export async function runCli(argv = process.argv.slice(2), deps = defaultDependencies()) {

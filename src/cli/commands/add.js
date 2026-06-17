@@ -32,7 +32,7 @@ const AddInputSchema = z.object({
   tags: z.array(z.string().min(1)).optional(),
 });
 
-const HELP = `Usage: neurogram add <text...> [options]
+const HELP = `Usage: atlas add <text...> [options]
 
 Save a NEW personal memory. The text is split into atomic memories, each
 matched against existing memories, and either created, updated, or left
@@ -58,7 +58,7 @@ export const meta = {
 export async function run({ positional, flags, deps, json }) {
   const text = positional.join(" ").trim();
   if (!text) {
-    printError("add requires text. Try: neurogram add \"I prefer dark roast coffee\"");
+    printError("add requires text. Try: atlas add \"I prefer dark roast coffee\"");
     return { exitCode: 2 };
   }
 

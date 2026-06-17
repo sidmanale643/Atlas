@@ -314,6 +314,7 @@ const MEMORY_CATALOG_SORTS = Object.freeze({
   source: "m.source",
   confidence: "m.confidence",
   created_at: "m.created_at",
+  linked: "linked_count",
 });
 
 export function getMemoryCatalog({
@@ -389,7 +390,13 @@ export function getMemoryCatalog({
             END
           ) FILTER (WHERE e.id IS NOT NULL),
           json('[]')
-        ) AS entities_json
+        ) AS entities_json,
+        (
+          SELECT COUNT(DISTINCT cand.memory_id)
+          FROM memory_entities cur
+          JOIN memory_entities cand ON cand.entity_id = cur.entity_id AND cand.memory_id <> cur.memory_id
+          WHERE cur.memory_id = m.id
+        ) AS linked_count
       FROM memories m
       LEFT JOIN memory_entities me ON me.memory_id = m.id
       LEFT JOIN entities e ON e.id = me.entity_id
@@ -399,9 +406,10 @@ export function getMemoryCatalog({
       LIMIT @limit OFFSET @offset
     `)
     .all({ ...params, limit, offset })
-    .map(({ entities_json: entitiesJson, ...memory }) => ({
+    .map(({ entities_json: entitiesJson, linked_count: linkedCount, ...memory }) => ({
       ...deserializeMemory(memory),
       entities: JSON.parse(entitiesJson),
+      linked_count: linkedCount || 0,
     }));
 
   return { items: rows, total: count, limit, offset };
@@ -1793,6 +1801,18 @@ export function deleteAllMemories() {
   db.exec("DELETE FROM memories");
   db.exec("DELETE FROM memories_fts");
   db.exec("INSERT INTO memories_fts(memories_fts) VALUES('optimize')");
+}
+
+export function deleteAllEntities() {
+  const db = getDb();
+  const cleanup = db.transaction(() => {
+    db.exec("DELETE FROM memory_entities");
+    db.exec("DELETE FROM relationships");
+    db.exec("DELETE FROM entity_resolution_suggestions");
+    db.exec("DELETE FROM entity_aliases");
+    db.exec("DELETE FROM entities");
+  });
+  cleanup();
 }
 
 export function deleteMemory(id) {
