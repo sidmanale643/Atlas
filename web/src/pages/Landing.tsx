@@ -72,7 +72,7 @@ const PRINCIPLES: ReadonlyArray<{ index: string; term: string; body: string }> =
 const FAQS: ReadonlyArray<{ q: string; a: string }> = [
   {
     q: "Where do my memories actually live?",
-    a: "On your machine. SQLite holds the graph (the bones); a Qdrant instance you point at holds the embeddings (the smell). Nothing phones home unless you wire it to.",
+    a: "On your machine. SQLite holds the graph (the bones); LanceDB holds the embeddings (the smell). Only the extraction step calls the LLM provider you configure.",
   },
   {
     q: "Does it need an LLM?",
@@ -84,7 +84,7 @@ const FAQS: ReadonlyArray<{ q: string; a: string }> = [
   },
   {
     q: "What do I actually need to run it?",
-    a: "A local Node server, a SQLite file and a Qdrant instance you point at — all of which you keep. Bring your own LLM key for the extraction step. No cloud account, no telemetry.",
+    a: "A local Node server, a SQLite file and a local LanceDB directory — all of which you keep. Bring your own LLM key for the extraction step. No Atlas cloud account or telemetry.",
   },
   {
     q: "Is the neuroscience literal?",
@@ -181,6 +181,7 @@ export default function Landing() {
           <motion.a href="#architecture" variants={fadeUp}>Architecture</motion.a>
           <motion.a href="#mcp" variants={fadeUp}>Connect</motion.a>
           <motion.a href="#science" variants={fadeUp}>Science</motion.a>
+          <motion.a href="https://github.com/sidmanale643/Atlas" target="_blank" rel="noopener noreferrer" variants={fadeUp}>GitHub</motion.a>
           <motion.a className={`nrg-btn ${styles.barCta}`} href="/atlas" variants={fadeUp}>
             Open the atlas
           </motion.a>
@@ -311,11 +312,11 @@ export default function Landing() {
           <div className={styles.sectionHead}>
             <span className="rule-label">how it fits</span>
             <h2>
-              One write, two stores, <em>three ways back.</em>
+              One memory, one source, <em>three ways back.</em>
             </h2>
             <p>
               A moment is captured once, then persisted to a relational graph and a
-              vector index at the same time — so it can be recalled by meaning, by
+              vector index as a rebuildable projection — so it can be recalled by meaning, by
               association, or by name. A Node server orchestrates the write; an MCP
               server exposes it to agents.
             </p>
@@ -348,6 +349,10 @@ export default function Landing() {
                 Reads are safe by default — <code>delete_memory</code> is the only
                 destructive call, and it confirms first.
               </p>
+              <div className={styles.mcpInstall}>
+                <span className={styles.mcpInstallLabel}>Quick start</span>
+                <pre className={styles.mcpInstallCode}><code>{"npm i -g atlas-mcp\nnpx atlas-mcp"}</code></pre>
+              </div>
             </div>
 
             <div className={styles.mcpRight}>
@@ -463,6 +468,7 @@ export default function Landing() {
           <a href="/memories">Memories</a>
           <a href="/graph">Graph</a>
           <a href="/memories/compare">Compare</a>
+          <a href="https://github.com/sidmanale643/Atlas" target="_blank" rel="noopener noreferrer">GitHub</a>
         </nav>
         <span className={styles.footerFine}>A map of remembered things</span>
       </footer>

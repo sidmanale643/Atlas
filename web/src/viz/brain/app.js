@@ -121,10 +121,10 @@ const submitButton = form.querySelector("button[type=submit]");
 const cardTemplate = document.querySelector("#memoryCardTemplate");
 const brainStage = document.querySelector("#brainStage");
 const brainCanvas = document.querySelector("#brainModel");
+const brainFullscreenButton = document.querySelector("#brainFullscreenButton");
 const memoryHoverPanel = document.querySelector("#memoryHoverPanel");
 const clearSelectionButton = document.querySelector("#clearSelectionButton");
 const regionLabels = document.querySelector("#regionLabels");
-const hippocampusIntro = document.querySelector("#hippocampusIntro");
 const searchInput = document.querySelector("#memorySearch");
 const searchStatus = document.querySelector("#memorySearchStatus");
 const resetFiltersButton = document.querySelector("#resetFiltersButton");
@@ -247,6 +247,29 @@ clearButton.addEventListener("click", async () => {
 });
 
 clearSelectionButton.addEventListener("click", clearSelection);
+brainFullscreenButton.addEventListener("click", async () => {
+  try {
+    if (document.fullscreenElement === brainStage) {
+      await document.exitFullscreen();
+    } else {
+      await brainStage.requestFullscreen();
+    }
+  } catch (error) {
+    console.error("Could not change brain fullscreen mode:", error);
+  }
+});
+
+document.addEventListener("fullscreenchange", () => {
+  const isFullscreen = document.fullscreenElement === brainStage;
+  brainFullscreenButton.setAttribute("aria-pressed", String(isFullscreen));
+  brainFullscreenButton.setAttribute(
+    "aria-label",
+    isFullscreen ? "Exit brain fullscreen" : "View brain in fullscreen",
+  );
+  brainFullscreenButton.querySelector(".brain-fullscreen-label").textContent =
+    isFullscreen ? "Exit fullscreen" : "Fullscreen";
+});
+
 searchInput.addEventListener("input", () => {
   searchQuery = searchInput.value;
   scheduleSemanticSearch();
@@ -706,6 +729,7 @@ function selectMemory(
   selectedMemoryId = id;
   hoveredRegion = null;
   selectedRegion = memoryNodeState.get(id)?.core.region || null;
+  if (brainControls) brainControls.autoRotate = false;
   if (recordHistory) {
     navigationHistory = pushNavigation(navigationHistory, {
       type: "memory",
@@ -1854,11 +1878,13 @@ function renderMemoryList() {
       tags.append(tag);
     });
 
-    card.addEventListener("click", () => selectMemory(memory.id));
+    card.addEventListener("click", () =>
+      selectMemory(memory.id, { focusCamera: false }),
+    );
     card.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
-      selectMemory(memory.id);
+      selectMemory(memory.id, { focusCamera: false });
     });
     memoryList.append(card);
   });
@@ -2090,11 +2116,10 @@ function createHippocampusCurve(side, anchorPosition) {
 
 function updateRegionMarkers() {
   regionMarkers.forEach((marker) => setRegionMarkerWeight(marker, 0));
-  const showHippocampusIntro =
+  const showDefaultHippocampus =
     !entityLens && selectedMemoryId == null && hoveredMemoryId == null;
-  hippocampusIntro.hidden = !showHippocampusIntro;
 
-  if (showHippocampusIntro) {
+  if (showDefaultHippocampus) {
     const hippocampusMarker = regionMarkers.get("hippocampus");
     if (hippocampusMarker) setRegionMarkerWeight(hippocampusMarker, 0.28);
     return;
@@ -2149,8 +2174,12 @@ function setRegionMarkerWeight(
     const rightWeight = hemispheres ? hemispheres.right ?? weight / 2 : weight / 2;
     const leftIdx = REGION_SHADER_INDEX["hippocampusLeft"];
     const rightIdx = REGION_SHADER_INDEX["hippocampusRight"];
-    if (leftIdx != null) setBrainRegionShaderWeight(leftIdx, leftWeight, emphasis);
-    if (rightIdx != null) setBrainRegionShaderWeight(rightIdx, rightWeight, emphasis);
+    if (leftIdx != null) {
+      setBrainRegionShaderWeight(leftIdx, leftWeight, emphasis);
+    }
+    if (rightIdx != null) {
+      setBrainRegionShaderWeight(rightIdx, rightWeight, emphasis);
+    }
   } else {
     const regionIndex = REGION_SHADER_INDEX[region];
     if (regionIndex != null) {
@@ -2450,6 +2479,7 @@ function updateRegionLabels() {
     button.type = "button";
     button.className = "region-label";
     button.dataset.region = region;
+    button.dataset.role = anchor.role;
     button.style.setProperty("--region-color", anchor.color);
     button.setAttribute(
       "aria-label",
@@ -2602,7 +2632,6 @@ function renderMemoryNodes() {
   updateRegionLabels();
   renderEntityLens3D();
   renderRelatedMemoryLinks3D();
-  if (!entityLens) focusSelectedMemory();
 }
 
 function renderRelatedMemoryLinks3D() {

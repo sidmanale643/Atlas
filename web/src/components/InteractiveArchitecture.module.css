@@ -55,6 +55,14 @@
   pointer-events: none;
 }
 
+.indexLabel {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  fill: var(--faint);
+  pointer-events: none;
+}
+
 /* ---- arrows between capture nodes ---- */
 .arrow {
   stroke: var(--green);
@@ -211,13 +219,28 @@
   pointer-events: none;
 }
 
-/* ---- detail panel overlay ---- */
-.detailForeign {
-  pointer-events: none;
+/* ---- keyboard focus ---- */
+.node:focus-visible,
+.storeNode:focus-visible,
+.recallNode:focus-visible,
+.userNode:focus-visible {
+  outline: none;
+}
+
+.node:focus-visible rect,
+.storeNode:focus-visible rect,
+.recallNode:focus-visible rect,
+.userNode:focus-visible rect {
+  stroke: var(--green-bright);
+  stroke-width: 2;
+}
+
+/* ---- detail panel below the diagram ---- */
+.detailRegion {
+  margin-top: 16px;
 }
 
 .detailPanel {
-  pointer-events: auto;
   background: var(--bg);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -246,10 +269,18 @@
   font-size: 10px;
   letter-spacing: 0.08em;
   color: var(--faint);
+  background: transparent;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  padding: 1px 6px;
-  pointer-events: none;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.detailClose:hover,
+.detailClose:focus-visible {
+  color: var(--text);
+  border-color: var(--green);
+  outline: none;
 }
 
 .detailTitle {
@@ -273,6 +304,16 @@
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.6;
+  color: var(--faint);
+}
+
+.detailHint {
+  margin: 0;
+  padding: 14px 0;
+  border-top: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
   color: var(--faint);
 }
 

@@ -679,6 +679,31 @@
   color: var(--green);
 }
 
+.mcpInstall {
+  margin-top: 20px;
+}
+.mcpInstallLabel {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.mcpInstallCode {
+  margin: 0;
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--green-bright);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  white-space: pre;
+}
+
 .mcpRight {
   display: flex;
   flex-direction: column;

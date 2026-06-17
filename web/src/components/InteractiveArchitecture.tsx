@@ -34,11 +34,11 @@ const NODES: Record<string, NodeDetail> = {
     ],
   },
   embedding: {
-    title: "Embedding (384-d vector)",
+    title: "Prepared atomic memory",
     lines: [
-      "Sentence-transformer encodes the full memory text.",
-      "384 dimensions capture semantic meaning densely.",
-      "Written to Qdrant for similarity search.",
+      "One validated memory, ready for durable persistence.",
+      "Carries entities, relationships, metadata, and ROI tags.",
+      "SQLite commits it before vector indexing begins.",
     ],
   },
   sqlite: {
@@ -49,12 +49,12 @@ const NODES: Record<string, NodeDetail> = {
       "Queried for structural and catalog retrieval.",
     ],
   },
-  qdrant: {
-    title: "Qdrant — atlas_memories",
+  lancedb: {
+    title: "LanceDB — atlas_memories",
     lines: [
-      "Vector store holding 384-d embeddings.",
-      "Retrieval uses cosine distance (ANN search).",
-      "Fast approximate nearest-neighbour at scale.",
+      "Local vector store holding 384-d embeddings.",
+      "Retrieval uses exact cosine-distance search.",
+      "Stored alongside Atlas on your machine.",
     ],
   },
   semantic: {
@@ -105,6 +105,16 @@ export default function InteractiveArchitecture() {
     [],
   );
 
+  const handleNodeKeyDown = useCallback(
+    (id: string) => (e: React.KeyboardEvent<SVGGElement>) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setActive((prev) => (prev === id ? null : id));
+    },
+    [],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setActive(null);
@@ -121,8 +131,9 @@ export default function InteractiveArchitecture() {
         ref={svgRef}
         viewBox="0 0 960 520"
         className={styles.svg}
-        role="img"
-        aria-label="Interactive architecture diagram — click any node for details"
+        role="group"
+        aria-label="Interactive Atlas memory architecture diagram"
+        aria-describedby="architecture-instructions"
         onClick={() => setActive(null)}
       >
         <title>Atlas memory architecture — interactive</title>
@@ -137,7 +148,7 @@ export default function InteractiveArchitecture() {
         />
 
         <text x="0" y="155" className={styles.tierLabel}>
-          ONE WRITE · TWO STORES
+          SOURCE OF TRUTH · DERIVED INDEX
         </text>
         <line
           x1="0" y1="161" x2="960" y2="161"
@@ -158,9 +169,8 @@ export default function InteractiveArchitecture() {
           onClick={handleNodeClick("nl")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("nl")(e as any);
-          }}
+          aria-pressed={active === "nl"}
+          onKeyDown={handleNodeKeyDown("nl")}
         >
           <rect x="0" y="30" width="150" height="48" rx="4" />
           <text x="75" y="50" textAnchor="middle" className={styles.nodeTitle}>
@@ -179,9 +189,8 @@ export default function InteractiveArchitecture() {
           onClick={handleNodeClick("schema")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("schema")(e as any);
-          }}
+          aria-pressed={active === "schema"}
+          onKeyDown={handleNodeKeyDown("schema")}
         >
           <rect x="196" y="30" width="150" height="48" rx="4" />
           <text x="271" y="50" textAnchor="middle" className={styles.nodeTitle}>
@@ -200,9 +209,8 @@ export default function InteractiveArchitecture() {
           onClick={handleNodeClick("cortical")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("cortical")(e as any);
-          }}
+          aria-pressed={active === "cortical"}
+          onKeyDown={handleNodeKeyDown("cortical")}
         >
           <rect x="392" y="30" width="150" height="48" rx="4" />
           <text x="467" y="50" textAnchor="middle" className={styles.nodeTitle}>
@@ -221,24 +229,20 @@ export default function InteractiveArchitecture() {
           onClick={handleNodeClick("embedding")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("embedding")(e as any);
-          }}
+          aria-pressed={active === "embedding"}
+          onKeyDown={handleNodeKeyDown("embedding")}
         >
           <rect x="588" y="30" width="150" height="48" rx="4" />
           <text x="663" y="58" textAnchor="middle" className={styles.nodeTitle}>
-            Embedding
+            Atomic memory
           </text>
         </g>
 
-        {/* ── branching pipes: capture → stores ── */}
+        {/* ── prepared memory → durable source of truth ── */}
         <line x1="663" y1="78" x2="663" y2="108" className={styles.pipe} />
         <line x1="663" y1="108" x2="310" y2="108" className={styles.pipe} />
-        <line x1="663" y1="108" x2="820" y2="108" className={styles.pipe} />
         <line x1="310" y1="108" x2="310" y2="130" className={styles.pipe} />
         <polygon points="305,126 310,136 315,126" className={styles.pipeHead} />
-        <line x1="820" y1="108" x2="820" y2="130" className={styles.pipe} />
-        <polygon points="815,126 820,136 825,126" className={styles.pipeHead} />
 
         {/* ── stores ── */}
         <g
@@ -246,9 +250,8 @@ export default function InteractiveArchitecture() {
           onClick={handleNodeClick("sqlite")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("sqlite")(e as any);
-          }}
+          aria-pressed={active === "sqlite"}
+          onKeyDown={handleNodeKeyDown("sqlite")}
         >
           <rect x="155" y="168" width="310" height="80" rx="4" />
           <text x="175" y="192" className={styles.storeName}>
@@ -266,17 +269,16 @@ export default function InteractiveArchitecture() {
         </g>
 
         <g
-          className={`${styles.storeNode} ${active === "qdrant" ? styles.nodeActive : ""}`}
-          onClick={handleNodeClick("qdrant")}
+          className={`${styles.storeNode} ${active === "lancedb" ? styles.nodeActive : ""}`}
+          onClick={handleNodeClick("lancedb")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("qdrant")(e as any);
-          }}
+          aria-pressed={active === "lancedb"}
+          onKeyDown={handleNodeKeyDown("lancedb")}
         >
           <rect x="555" y="168" width="310" height="80" rx="4" />
           <text x="575" y="192" className={styles.storeName}>
-            Qdrant
+            LanceDB
           </text>
           <text x="675" y="192" className={styles.storeCode}>
             atlas_memories
@@ -285,66 +287,47 @@ export default function InteractiveArchitecture() {
             Semantic index
           </text>
           <text x="575" y="234" className={styles.storeDetail}>
-            BM25 Vector Search
+            Cosine vector search
           </text>
         </g>
 
-        {/* ── merge pipes: stores → recall ── */}
+        {/* SQLite commits first; LanceDB is a rebuildable projection. */}
+        <line x1="465" y1="208" x2="545" y2="208" className={styles.arrow} />
+        <polygon points="541,203 551,208 541,213" className={styles.arrowHead} />
+        <text x="508" y="194" textAnchor="middle" className={styles.indexLabel}>
+          EMBED + INDEX
+        </text>
+
+        {/* ── each store feeds only the retrieval modes it owns ── */}
         <line x1="310" y1="248" x2="310" y2="278" className={styles.pipe} />
-        <line x1="820" y1="248" x2="820" y2="278" className={styles.pipe} />
-        <line x1="260" y1="278" x2="820" y2="278" className={styles.pipe} />
-        <line x1="260" y1="278" x2="260" y2="300" className={styles.pipe} />
-        <polygon points="255,296 260,306 265,296" className={styles.pipeHead} />
-        <line x1="540" y1="278" x2="540" y2="300" className={styles.pipe} />
-        <polygon points="535,296 540,306 545,296" className={styles.pipeHead} />
-        <line x1="820" y1="278" x2="820" y2="300" className={styles.pipe} />
-        <polygon points="815,296 820,306 825,296" className={styles.pipeHead} />
+        <line x1="180" y1="278" x2="450" y2="278" className={styles.pipe} />
+        <line x1="180" y1="278" x2="180" y2="300" className={styles.pipe} />
+        <polygon points="175,296 180,306 185,296" className={styles.pipeHead} />
+        <line x1="450" y1="278" x2="450" y2="300" className={styles.pipe} />
+        <polygon points="445,296 450,306 455,296" className={styles.pipeHead} />
+
+        <line x1="710" y1="248" x2="710" y2="278" className={styles.pipe} />
+        <line x1="710" y1="278" x2="770" y2="278" className={styles.pipe} />
+        <line x1="770" y1="278" x2="770" y2="300" className={styles.pipe} />
+        <polygon points="765,296 770,306 775,296" className={styles.pipeHead} />
 
         {/* ── recall paths ── */}
-        <g
-          className={`${styles.recallNode} ${active === "semantic" ? styles.nodeActive : ""}`}
-          onClick={handleNodeClick("semantic")}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("semantic")(e as any);
-          }}
-        >
-          <rect x="80" y="340" width="360" height="90" rx="4" />
-          <text x="100" y="364" className={styles.recallName}>
-            Semantic recall
-          </text>
-          <text x="100" y="386" className={styles.recallDesc}>
-            Embed the query, take the cosine-nearest
-          </text>
-          <text x="100" y="402" className={styles.recallDesc}>
-            vectors from Qdrant.
-          </text>
-          <text x="100" y="420" className={styles.recallTag}>
-            GET /api/memories/search
-          </text>
-        </g>
-
         <g
           className={`${styles.recallNode} ${active === "structural" ? styles.nodeActive : ""}`}
           onClick={handleNodeClick("structural")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("structural")(e as any);
-          }}
+          aria-pressed={active === "structural"}
+          onKeyDown={handleNodeKeyDown("structural")}
         >
-          <rect x="460" y="340" width="160" height="90" rx="4" />
-          <text x="480" y="364" className={styles.recallName}>
-            Structural
+          <rect x="80" y="340" width="200" height="90" rx="4" />
+          <text x="100" y="364" className={styles.recallName}>
+            Structural links
           </text>
-          <text x="480" y="380" className={styles.recallName}>
-            links
-          </text>
-          <text x="480" y="402" className={styles.recallDesc}>
+          <text x="100" y="386" className={styles.recallDesc}>
             Memories sharing
           </text>
-          <text x="480" y="418" className={styles.recallDesc}>
+          <text x="100" y="402" className={styles.recallDesc}>
             entities or triples
           </text>
         </g>
@@ -354,30 +337,52 @@ export default function InteractiveArchitecture() {
           onClick={handleNodeClick("catalog")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("catalog")(e as any);
-          }}
+          aria-pressed={active === "catalog"}
+          onKeyDown={handleNodeKeyDown("catalog")}
         >
-          <rect x="640" y="340" width="230" height="90" rx="4" />
-          <text x="660" y="364" className={styles.recallName}>
+          <rect x="300" y="340" width="300" height="90" rx="4" />
+          <text x="320" y="364" className={styles.recallName}>
             Entity &amp; catalog
           </text>
-          <text x="660" y="386" className={styles.recallDesc}>
+          <text x="320" y="386" className={styles.recallDesc}>
             Full-text search across names,
           </text>
-          <text x="660" y="402" className={styles.recallDesc}>
+          <text x="320" y="402" className={styles.recallDesc}>
             aliases, summaries and raw text.
           </text>
-          <text x="660" y="420" className={styles.recallTag}>
+          <text x="320" y="420" className={styles.recallTag}>
             GET /api/catalog
           </text>
         </g>
 
+        <g
+          className={`${styles.recallNode} ${active === "semantic" ? styles.nodeActive : ""}`}
+          onClick={handleNodeClick("semantic")}
+          role="button"
+          tabIndex={0}
+          aria-pressed={active === "semantic"}
+          onKeyDown={handleNodeKeyDown("semantic")}
+        >
+          <rect x="620" y="340" width="300" height="90" rx="4" />
+          <text x="640" y="364" className={styles.recallName}>
+            Semantic recall
+          </text>
+          <text x="640" y="386" className={styles.recallDesc}>
+            Embed the query; find the nearest
+          </text>
+          <text x="640" y="402" className={styles.recallDesc}>
+            vectors in the local index.
+          </text>
+          <text x="640" y="420" className={styles.recallTag}>
+            GET /api/memories/search
+          </text>
+        </g>
+
         {/* ── converge pipes to MCP client ── */}
-        <line x1="260" y1="430" x2="260" y2="460" className={styles.pipe} />
-        <line x1="540" y1="430" x2="540" y2="460" className={styles.pipe} />
-        <line x1="820" y1="430" x2="820" y2="460" className={styles.pipe} />
-        <line x1="260" y1="460" x2="820" y2="460" className={styles.pipe} />
+        <line x1="180" y1="430" x2="180" y2="460" className={styles.pipe} />
+        <line x1="450" y1="430" x2="450" y2="460" className={styles.pipe} />
+        <line x1="770" y1="430" x2="770" y2="460" className={styles.pipe} />
+        <line x1="180" y1="460" x2="770" y2="460" className={styles.pipe} />
         <line x1="540" y1="460" x2="540" y2="480" className={styles.pipe} />
         <polygon points="535,476 540,486 545,476" className={styles.pipeHead} />
 
@@ -387,9 +392,8 @@ export default function InteractiveArchitecture() {
           onClick={handleNodeClick("mcp")}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") handleNodeClick("mcp")(e as any);
-          }}
+          aria-pressed={active === "mcp"}
+          onKeyDown={handleNodeKeyDown("mcp")}
         >
           <rect x="440" y="488" width="200" height="30" rx="4" />
           <text x="540" y="508" textAnchor="middle" className={styles.userLabel}>
@@ -397,22 +401,32 @@ export default function InteractiveArchitecture() {
           </text>
         </g>
 
-        {/* ── detail panel overlay ── */}
-        {detail && (
-          <foreignObject x="200" y="180" width="560" height="160" className={styles.detailForeign}>
-            <div
-              className={styles.detailPanel}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <span className={styles.detailClose}>esc</span>
-              <p className={styles.detailTitle}>{detail.title}</p>
-              {detail.lines[0] && <p className={styles.detailLine}>{detail.lines[0]}</p>}
-              {detail.lines[1] && <p className={styles.detailLine}>{detail.lines[1]}</p>}
-              {detail.lines[2] && <p className={styles.detailLineDim}>{detail.lines[2]}</p>}
-            </div>
-          </foreignObject>
-        )}
       </svg>
+
+      <div
+        id="architecture-instructions"
+        className={styles.detailRegion}
+        aria-live="polite"
+      >
+        {detail ? (
+          <div className={styles.detailPanel}>
+            <button
+              type="button"
+              className={styles.detailClose}
+              onClick={() => setActive(null)}
+              aria-label="Close architecture details"
+            >
+              Close <span aria-hidden="true">· esc</span>
+            </button>
+            <p className={styles.detailTitle}>{detail.title}</p>
+            {detail.lines[0] && <p className={styles.detailLine}>{detail.lines[0]}</p>}
+            {detail.lines[1] && <p className={styles.detailLine}>{detail.lines[1]}</p>}
+            {detail.lines[2] && <p className={styles.detailLineDim}>{detail.lines[2]}</p>}
+          </div>
+        ) : (
+          <p className={styles.detailHint}>Select any node to inspect its role in the system.</p>
+        )}
+      </div>
     </div>
   );
 }

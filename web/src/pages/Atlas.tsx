@@ -10,30 +10,44 @@ import "./Atlas.css";
  */
 const SCAFFOLD = `
   <section class="atlas-grid">
-    <section class="atlas-panel">
-      <div class="atlas-heading">
-        <h2 class="atlas-h">Association field</h2>
-        <div class="atlas-controls">
-          <div class="memory-search">
-            <label class="visually-hidden" for="memorySearch">Search memories</label>
-            <input id="memorySearch" type="search" autocomplete="off"
-              placeholder="Search memories by meaning" aria-describedby="memorySearchStatus" />
-            <button class="text-button" id="resetFiltersButton" type="button" hidden>Reset</button>
+    <aside class="memory-log">
+      <div class="memory-log-header">
+        <h2 class="atlas-h">Recent traces</h2>
+        <div class="atlas-count"><strong id="memoryCount">0</strong><span>shown</span></div>
+      </div>
+
+      <div class="atlas-controls">
+        <div class="memory-search">
+          <label class="visually-hidden" for="memorySearch">Search memories</label>
+          <input id="memorySearch" type="search" autocomplete="off"
+            placeholder="Search memories by meaning" aria-describedby="memorySearchStatus" />
+          <button class="text-button" id="resetFiltersButton" type="button" hidden>Reset</button>
+        </div>
+        <p class="memory-search-status" id="memorySearchStatus" role="status" aria-live="polite" hidden></p>
+        <div class="atlas-actions">
+          <div class="source-filter" role="group" aria-label="Filter memories by source">
+            <button class="filter-button active" data-filter="all" type="button" aria-pressed="true">All</button>
+            <button class="filter-button" data-filter="ui" type="button" aria-pressed="false">User</button>
+            <button class="filter-button" data-filter="mcp" type="button" aria-pressed="false">Agent</button>
           </div>
-          <p class="memory-search-status" id="memorySearchStatus" role="status" aria-live="polite" hidden></p>
-          <div class="atlas-actions">
-            <div class="source-filter" role="group" aria-label="Filter memories by source">
-              <button class="filter-button active" data-filter="all" type="button" aria-pressed="true">All</button>
-              <button class="filter-button" data-filter="ui" type="button" aria-pressed="false">User</button>
-              <button class="filter-button" data-filter="mcp" type="button" aria-pressed="false">Agent</button>
-            </div>
-            <button class="text-button" id="clearSelectionButton" type="button" hidden>Clear selection</button>
-            <div class="atlas-count"><strong id="memoryCount">0</strong><span>shown</span></div>
-          </div>
+          <button class="text-button" id="clearSelectionButton" type="button" hidden>Clear selection</button>
         </div>
       </div>
 
+      <div class="memory-list" id="memoryList"></div>
+      <button class="text-button clear-atlas-button" id="clearButton" type="button">Clear atlas</button>
+    </aside>
+
+    <section class="atlas-panel">
+      <div class="atlas-heading">
+        <h2 class="atlas-h">Association field</h2>
+      </div>
+
       <div class="brain-stage" id="brainStage">
+        <button class="brain-fullscreen-button" id="brainFullscreenButton" type="button"
+          aria-label="View brain in fullscreen" aria-pressed="false">
+          <span aria-hidden="true">↗↙</span><span class="brain-fullscreen-label">Fullscreen</span>
+        </button>
         <div class="scan-interface" aria-hidden="true"><span class="scan-reticle"></span></div>
         <canvas class="brain-model" id="brainModel"
           aria-label="Rotating three-dimensional model of a human brain"></canvas>
@@ -49,41 +63,30 @@ const SCAFFOLD = `
           <li><i class="key-relationship"></i><span>Relationship</span></li>
         </ul>
         <div class="region-labels" id="regionLabels" aria-label="Active brain regions" hidden></div>
-        <p class="hippocampus-intro" id="hippocampusIntro">
-          The two hippocampi normally participate together in forming and retrieving memories.<br>
-          Left hippocampus: more involved in verbal and narrative memories.<br>
-          Right hippocampus: more involved in spatial and visual memories.
-        </p>
         <div class="memory-hover-panel" id="memoryHoverPanel" role="tooltip" hidden></div>
         <div class="empty-state" id="emptyState"></div>
       </div>
     </section>
 
-    <aside class="composer">
-      <h2 class="atlas-h">Record a memory</h2>
-      <form id="memoryForm">
-        <label for="memoryInput">What happened?</label>
-        <textarea id="memoryInput" rows="5"
-          placeholder="I went to a cafe with Maya yesterday..." required></textarea>
-        <div class="composer-meta">
-          <span>Natural language</span>
-          <span id="characterCount">0 / 180</span>
-        </div>
-        <button class="record-button" type="submit">
-          <span>Encode memory</span>
-        </button>
-      </form>
+    <aside class="atlas-inspector">
+      <div class="memory-detail" id="memoryDetail" aria-live="polite"></div>
+
+      <section class="composer">
+        <h2 class="atlas-h">Record a memory</h2>
+        <form id="memoryForm">
+          <label for="memoryInput">What happened?</label>
+          <textarea id="memoryInput" rows="5"
+            placeholder="I went to a cafe with Maya yesterday..." required></textarea>
+          <div class="composer-meta">
+            <span>Natural language</span>
+            <span id="characterCount">0 / 180</span>
+          </div>
+          <button class="record-button" type="submit">
+            <span>Encode memory</span>
+          </button>
+        </form>
+      </section>
     </aside>
-  </section>
-
-  <div class="memory-detail" id="memoryDetail" aria-live="polite"></div>
-
-  <section class="memory-log">
-    <div class="memory-log-header">
-      <h2 class="atlas-h">Recent traces</h2>
-      <button class="text-button" id="clearButton" type="button">Clear atlas</button>
-    </div>
-    <div class="memory-list" id="memoryList"></div>
   </section>
 
   <template id="memoryCardTemplate">

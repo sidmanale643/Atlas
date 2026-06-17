@@ -310,6 +310,50 @@
   pointer-events: none;
 }
 
+.brain-fullscreen-button {
+  position: absolute;
+  z-index: 8;
+  top: 18px;
+  right: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: rgba(17, 19, 24, 0.82);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.brain-fullscreen-button:hover,
+.brain-fullscreen-button:focus-visible {
+  border-color: var(--green);
+  background: rgba(17, 19, 24, 0.95);
+  color: var(--green-bright);
+  outline: none;
+}
+
+.brain-fullscreen-button > span[aria-hidden="true"] {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.brain-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  border: 0;
+  border-radius: 0;
+  background-color: var(--bg-2);
+}
+
 /* scan interface / reticle — subtle instrument framing */
 .scan-interface {
   position: absolute;
@@ -537,26 +581,6 @@
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
-
-/* hippocampus intro note --------------------------------------------------- */
-.hippocampus-intro {
-  position: absolute;
-  z-index: 3;
-  top: 50%;
-  right: 22px;
-  max-width: 190px;
-  margin: 0;
-  padding: 9px 11px;
-  border-left: 2px solid var(--green);
-  background: rgba(17, 19, 24, 0.75);
-  color: var(--text);
-  pointer-events: none;
-  transform: translateY(-50%);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  line-height: 1.55;
-}
-.hippocampus-intro[hidden] { display: none; }
 
 /* hover panel (tooltip) ---------------------------------------------------- */
 .memory-hover-panel {
@@ -1663,6 +1687,262 @@
 
 /* ── entity-lens state (overrides when an entity is selected) ── */
 .entity-copy { gap: 14px; }
+
+/* ==========================================================================
+   THREE-PANE WORKSPACE
+   Memories remain visible beside the association field; the right rail swaps
+   from capture to inspection when a memory is selected.
+   ========================================================================== */
+@media (min-width: 1181px) {
+  .atlas-root {
+    gap: 0;
+  }
+
+  .atlas-grid {
+    display: grid;
+    grid-template-columns: minmax(230px, 272px) minmax(520px, 1fr) minmax(300px, 360px);
+    gap: 0;
+    height: calc(100vh - 96px);
+    min-height: calc(100vh - 96px);
+    max-height: calc(100vh - 96px);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .memory-log,
+  .atlas-panel,
+  .atlas-inspector {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .memory-log {
+    display: grid;
+    grid-template-rows: 58px auto minmax(0, 1fr) 46px;
+    gap: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg-2) 78%, transparent);
+  }
+
+  .memory-log-header {
+    align-items: center;
+    margin: 0;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .memory-log-header .atlas-h,
+  .atlas-panel .atlas-h,
+  .atlas-inspector .atlas-h {
+    font-size: 22px;
+  }
+
+  .memory-log .atlas-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .memory-log .memory-search {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .memory-log .memory-search input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .memory-log .atlas-actions {
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .memory-log .filter-button {
+    padding-inline: 9px;
+  }
+
+  .memory-log .memory-search-status {
+    margin: 0;
+  }
+
+  .memory-list {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  .memory-card {
+    gap: 7px;
+    padding: 14px 16px;
+  }
+
+  .memory-card:hover,
+  .memory-card:focus-visible,
+  .memory-card[aria-pressed="true"] {
+    padding-left: 20px;
+  }
+
+  .memory-card-top time {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .memory-text {
+    font-size: 16px;
+  }
+
+  .memory-tags .tag {
+    padding-inline: 7px;
+    font-size: 9px;
+  }
+
+  .clear-atlas-button {
+    align-self: center;
+    justify-self: start;
+    margin-left: 16px;
+    color: var(--muted);
+  }
+
+  .atlas-panel {
+    display: grid;
+    grid-template-rows: 58px minmax(0, 1fr);
+    gap: 0;
+    padding: 0 18px 18px;
+    background: var(--bg);
+  }
+
+  .atlas-heading {
+    align-items: center;
+    padding: 0 2px;
+  }
+
+  .brain-stage {
+    min-height: 600px;
+    height: 100%;
+  }
+
+  .atlas-inspector {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg-2) 78%, transparent);
+  }
+
+  .atlas-inspector .composer {
+    gap: 20px;
+    padding: 18px;
+  }
+
+  .atlas-inspector:has(.memory-detail:not(:empty)) .composer {
+    display: none;
+  }
+
+  .atlas-inspector .memory-detail {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    border: 0;
+    background: transparent;
+  }
+
+  .atlas-inspector .memory-detail .detail-body {
+    grid-template-columns: 1fr;
+  }
+
+  .atlas-inspector .memory-detail .detail-sidebar {
+    border-top: 1px solid rgba(209, 213, 219, 0.72);
+    border-left: 0;
+  }
+
+  .atlas-inspector .memory-detail .detail-copy,
+  .atlas-inspector .memory-detail .detail-section,
+  .atlas-inspector .memory-detail .activation-detail,
+  .atlas-inspector .memory-detail .related-memory-section {
+    padding: 16px 18px;
+  }
+
+  .atlas-inspector .memory-detail .detail-copy p {
+    font-size: 13px;
+  }
+
+  .atlas-inspector .memory-detail .activation-item {
+    grid-template-columns: minmax(115px, 1fr) minmax(58px, .7fr) 40px;
+    gap: 7px;
+  }
+
+  .atlas-inspector .memory-detail .activation-name {
+    font-size: 11px;
+  }
+
+  .atlas-inspector .memory-detail .activation-heading strong {
+    font-size: 10px;
+  }
+
+  .atlas-inspector .memory-detail .activation-meter {
+    height: 12px;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1180px) {
+  .atlas-grid {
+    display: grid;
+    grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+    gap: 0;
+    border: 1px solid var(--line);
+  }
+
+  .memory-log {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 18px;
+    border-right: 1px solid var(--line);
+  }
+
+  .memory-search input { width: 100%; }
+  .atlas-panel {
+    grid-column: 2;
+    grid-row: 1;
+    padding: 18px;
+  }
+
+  .atlas-inspector {
+    grid-column: 1 / -1;
+    padding: 20px;
+    border-top: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 760px) {
+  .atlas-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .memory-log { order: 2; }
+  .atlas-panel { order: 1; }
+  .atlas-inspector { order: 3; }
+
+  .memory-log .atlas-controls {
+    align-items: stretch;
+    justify-items: stretch;
+  }
+
+  .memory-search input { width: 100%; }
+  .memory-log .atlas-actions { justify-content: space-between; }
+  .clear-atlas-button { align-self: flex-start; margin-top: 14px; }
+
+  .atlas-inspector:has(.memory-detail:not(:empty)) .composer {
+    display: none;
+  }
+}
 .entity-heading {
   display: flex;
   align-items: center;
