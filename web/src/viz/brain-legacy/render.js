@@ -2,14 +2,24 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { createMemoryNodeState } from "../brain/memory-placement.js";
+import { LEGACY_BRAIN_VISUAL_PROFILE } from "../brain/legacy-visual-profile.js";
 import { REGION_ANCHORS } from "../brain/region-anchors.js";
 import { animateLegacyConnections, animateLegacyMemoryNodes } from "./animations.js";
+import { LEGACY_REGION_COLORS } from "./region-colors.js";
 import { createLegacyRegionMarkers, updateLegacyRegionMarkers } from "./region-markers.js";
-import { getRegionShaderData } from "./regions.js";
+import {
+  LEGACY_REGION_GEOMETRY,
+  getLegacyMemoryPosition,
+  getLegacyRegionPositions,
+  getLegacyRegionTarget,
+  getRegionShaderData,
+  measureLegacyRegionPositions,
+} from "./regions.js";
 import { applyLegacyShell } from "./shell.js";
 
 const DRAG_THRESHOLD = 5;
 const MEMORY_COLOR = "#f4d8b4";
+const MEMORY_SURFACE_INSET_RATIO = 0.55;
 
 function disposeObject(object) {
   object.traverse((child) => {
@@ -19,9 +29,15 @@ function disposeObject(object) {
   });
 }
 
-function createMemoryNode(memory, state, index) {
+function getMemoryNodeRadius(memory) {
   const salience = THREE.MathUtils.clamp(Number(memory.extraction?.salience) || 0, 0, 1);
-  const radius = THREE.MathUtils.lerp(0.09, 0.16, salience);
+  return THREE.MathUtils.lerp(0.09, 0.16, salience);
+}
+
+function createMemoryNode(memory, state, index) {
+  const radius = getMemoryNodeRadius(memory);
+  const isSurfaceRegion =
+    LEGACY_REGION_GEOMETRY[state.core.region]?.kind === "surface";
   const node = new THREE.Mesh(
     new THREE.SphereGeometry(radius, 20, 14),
     new THREE.MeshStandardMaterial({
@@ -31,7 +47,7 @@ function createMemoryNode(memory, state, index) {
       roughness: 0.16,
       transparent: true,
       opacity: 0.96,
-      depthTest: false,
+      depthTest: isSurfaceRegion,
       depthWrite: false,
     }),
   );
@@ -39,6 +55,7 @@ function createMemoryNode(memory, state, index) {
   node.renderOrder = 10;
   node.userData = {
     memoryId: memory.id,
+    region: state.core.region,
     pulseOffset: index * 0.73,
     selectionScale: 1,
   };
@@ -52,7 +69,7 @@ function createMemoryNode(memory, state, index) {
         transparent: true,
         opacity: 0.12,
         blending: THREE.AdditiveBlending,
-        depthTest: false,
+        depthTest: isSurfaceRegion,
         depthWrite: false,
       }),
     );
@@ -62,15 +79,24 @@ function createMemoryNode(memory, state, index) {
   return node;
 }
 
-function createConnection(memoryId, start, activation) {
+function createConnection(memoryId, start, activation, connectionTargets) {
   const anchor = REGION_ANCHORS[activation.region];
-  if (!anchor) return [];
-  const targets = activation.region === "hippocampus" && anchor.hemispherePositions
-    ? Object.entries(anchor.hemispherePositions).map(([hemisphere, position]) => ({
-        position,
+  const geometry = LEGACY_REGION_GEOMETRY[activation.region];
+  if (!anchor || !geometry) return [];
+  const measured = connectionTargets.get(activation.region);
+  const hemispheres = ["left", "right"].filter(
+    (hemisphere) => measured?.[hemisphere],
+  );
+  const targets = hemispheres.length
+    ? hemispheres.map((hemisphere) => ({
+        position: measured?.[hemisphere]
+          || getLegacyRegionTarget(activation.region, hemisphere),
         weight: activation.hemispheres?.[hemisphere] ?? activation.weight / 2,
       }))
-    : [{ position: anchor.position, weight: activation.weight }];
+    : [{
+        position: measured?.center || getLegacyRegionTarget(activation.region),
+        weight: activation.weight,
+      }];
 
   return targets.map(({ position, weight }) => {
     const end = new THREE.Vector3(...position);
@@ -79,7 +105,7 @@ function createConnection(memoryId, start, activation) {
     const radius = THREE.MathUtils.lerp(0.006, 0.032, Math.sqrt(weight));
     const group = new THREE.Group();
     const material = new THREE.MeshBasicMaterial({
-      color: anchor.color,
+      color: LEGACY_REGION_COLORS[activation.region],
       transparent: true,
       opacity: THREE.MathUtils.lerp(0.2, 0.52, weight),
       blending: THREE.AdditiveBlending,
@@ -96,7 +122,7 @@ function createConnection(memoryId, start, activation) {
       const particle = new THREE.Mesh(
         new THREE.SphereGeometry(radius * 2.4, 10, 8),
         new THREE.MeshBasicMaterial({
-          color: anchor.color,
+          color: LEGACY_REGION_COLORS[activation.region],
           transparent: true,
           opacity: 0.92,
           blending: THREE.AdditiveBlending,
@@ -143,7 +169,7 @@ export function renderLegacyBrain({
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.18;
+  renderer.toneMappingExposure = 1.02;
 
   const controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
@@ -155,16 +181,88 @@ export function renderLegacyBrain({
   controls.autoRotateSpeed = 2.5;
   controls.addEventListener("start", () => { controls.autoRotate = false; });
 
-  scene.add(new THREE.HemisphereLight(0xfff8e9, 0x172527, 2.4));
-  const keyLight = new THREE.DirectionalLight(0xfff3df, 5.2);
+  const hemisphereLight = new THREE.HemisphereLight(0xe4e8e7, 0x182024, 0.95);
+  scene.add(hemisphereLight);
+  const keyLight = new THREE.DirectionalLight(0xfffbf2, 1.7);
   keyLight.position.set(-3, 4, 5);
   scene.add(keyLight);
-  const rimLight = new THREE.DirectionalLight(0x8ee7ff, 3.2);
-  rimLight.position.set(4, -1, 2);
+  const fillLight = new THREE.DirectionalLight(0xb9c7ce, 0.55);
+  fillLight.position.set(3, -1, 2);
+  scene.add(fillLight);
+  const rimLight = new THREE.DirectionalLight(0xdce8eb, 0.5);
+  rimLight.position.set(0, 2, -6);
   scene.add(rimLight);
-  const lowerLight = new THREE.PointLight(0xb7a4ff, 2.8, 12);
-  lowerLight.position.set(-2.5, -3, 3);
-  scene.add(lowerLight);
+  const idleLowerLight = new THREE.PointLight(
+    LEGACY_BRAIN_VISUAL_PROFILE.lights.lower.color,
+    0,
+    LEGACY_BRAIN_VISUAL_PROFILE.lights.lower.distance,
+  );
+  idleLowerLight.position.fromArray(
+    LEGACY_BRAIN_VISUAL_PROFILE.lights.lower.position,
+  );
+  scene.add(idleLowerLight);
+
+  const selectedHemisphereSky = new THREE.Color(0xe4e8e7);
+  const selectedHemisphereGround = new THREE.Color(0x182024);
+  const selectedKeyColor = new THREE.Color(0xfffbf2);
+  const selectedRimColor = new THREE.Color(0xdce8eb);
+  const idleHemisphereSky = new THREE.Color(
+    LEGACY_BRAIN_VISUAL_PROFILE.lights.hemisphere.sky,
+  );
+  const idleHemisphereGround = new THREE.Color(
+    LEGACY_BRAIN_VISUAL_PROFILE.lights.hemisphere.ground,
+  );
+  const idleKeyColor = new THREE.Color(
+    LEGACY_BRAIN_VISUAL_PROFILE.lights.key.color,
+  );
+  const idleRimColor = new THREE.Color(
+    LEGACY_BRAIN_VISUAL_PROFILE.lights.rim.color,
+  );
+  const selectedRimPosition = new THREE.Vector3(0, 2, -6);
+  const idleRimPosition = new THREE.Vector3().fromArray(
+    LEGACY_BRAIN_VISUAL_PROFILE.lights.rim.position,
+  );
+
+  function updateLighting(idleAmount) {
+    const profile = LEGACY_BRAIN_VISUAL_PROFILE;
+    hemisphereLight.color.copy(selectedHemisphereSky).lerp(
+      idleHemisphereSky,
+      idleAmount,
+    );
+    hemisphereLight.groundColor.copy(selectedHemisphereGround).lerp(
+      idleHemisphereGround,
+      idleAmount,
+    );
+    hemisphereLight.intensity = THREE.MathUtils.lerp(
+      0.95,
+      profile.lights.hemisphere.intensity,
+      idleAmount,
+    );
+    keyLight.color.copy(selectedKeyColor).lerp(idleKeyColor, idleAmount);
+    keyLight.intensity = THREE.MathUtils.lerp(
+      1.7,
+      profile.lights.key.intensity,
+      idleAmount,
+    );
+    fillLight.intensity = THREE.MathUtils.lerp(0.55, 0, idleAmount);
+    rimLight.color.copy(selectedRimColor).lerp(idleRimColor, idleAmount);
+    rimLight.intensity = THREE.MathUtils.lerp(
+      0.5,
+      profile.lights.rim.intensity,
+      idleAmount,
+    );
+    rimLight.position.lerpVectors(
+      selectedRimPosition,
+      idleRimPosition,
+      idleAmount,
+    );
+    idleLowerLight.intensity = profile.lights.lower.intensity * idleAmount;
+    renderer.toneMappingExposure = THREE.MathUtils.lerp(
+      1.02,
+      profile.toneMappingExposure,
+      idleAmount,
+    );
+  }
 
   const brainContent = new THREE.Group();
   brainContent.rotation.set(-0.08, -0.45, -0.08);
@@ -188,6 +286,8 @@ export function renderLegacyBrain({
   let memorySignature = "";
   let frame = 0;
   let disposed = false;
+  let legacyRegionPositions = getLegacyRegionPositions();
+  let legacyConnectionTargets = getLegacyRegionPositions();
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const pointerDown = new THREE.Vector2();
@@ -198,10 +298,17 @@ export function renderLegacyBrain({
     memoryGroup.clear();
     connectionGroup.clear();
     nodes = [];
-    const states = createMemoryNodeState(memories);
+    const states = createMemoryNodeState(memories, legacyRegionPositions);
     memories.forEach((memory, index) => {
       const state = states.get(memory.id);
       if (!state) return;
+      state.core.position =
+        getLegacyMemoryPosition(
+          memory.id,
+          state.core.region,
+          legacyRegionPositions,
+          getMemoryNodeRadius(memory) * MEMORY_SURFACE_INSET_RATIO,
+        ) || state.core.position;
       const node = createMemoryNode(memory, state, index);
       memoryGroup.add(node);
       nodes.push(node);
@@ -210,12 +317,13 @@ export function renderLegacyBrain({
           memory.id,
           new THREE.Vector3(...state.core.position),
           activation,
+          legacyConnectionTargets,
         )) connectionGroup.add(connection);
       }
     });
   }
 
-  function syncState() {
+  function syncState(deltaSeconds = 0) {
     const memories = getMemories();
     const signature = memories.map((memory) => memory.id).join("|");
     if (signature !== memorySignature) {
@@ -223,8 +331,8 @@ export function renderLegacyBrain({
       rebuildMemories(memories);
     }
     const activeId = getActiveMemoryId();
-    const focusedRegion = getFocusedRegion();
     const activeMemory = memories.find((memory) => memory.id === activeId) || null;
+    const focusedRegion = activeMemory ? getFocusedRegion() : null;
     nodes.forEach((node) => {
       const active = node.userData.memoryId === activeId;
       node.userData.selectionScale = active ? 1.35 : 1;
@@ -234,8 +342,17 @@ export function renderLegacyBrain({
     connectionGroup.children.forEach((connection) => {
       connection.visible = connection.userData.memoryId === activeId;
     });
-    markerState && updateLegacyRegionMarkers(markerState, { memory: activeMemory, focusedRegion });
-    shell?.setActivations(activeMemory?.regions, focusedRegion);
+    markerState && updateLegacyRegionMarkers(markerState, {
+      memory: activeMemory,
+      focusedRegion,
+    });
+    shell?.setActivations(activeMemory?.regions, focusedRegion, {
+      idle: activeMemory == null,
+    });
+    const idleAmount = shell?.update(deltaSeconds, {
+      immediate: reduceMotion.matches,
+    }) ?? 1;
+    updateLighting(idleAmount);
   }
 
   new OBJLoader().load(
@@ -248,9 +365,22 @@ export function renderLegacyBrain({
       const size = bounds.getSize(new THREE.Vector3());
       shell = applyLegacyShell(model, getRegionShaderData());
       model.position.sub(center);
+      legacyRegionPositions = measureLegacyRegionPositions(model);
       brainContent.scale.setScalar(4.5 / Math.max(size.x, size.y, size.z));
       brainContent.add(model);
-      markerState = createLegacyRegionMarkers(brainContent, REGION_ANCHORS);
+      const markerDefinitions = Object.fromEntries(
+        Object.entries(REGION_ANCHORS).map(([region, anchor]) => [
+          region,
+          {
+            ...anchor,
+            ...LEGACY_REGION_GEOMETRY[region],
+            position: legacyRegionPositions.get(region).center,
+          },
+        ]),
+      );
+      markerState = createLegacyRegionMarkers(brainContent, markerDefinitions);
+      legacyConnectionTargets = markerState.connectionTargets;
+      memorySignature = "";
       status.hidden = true;
       stage.dataset.modelState = "ready";
       syncState();
@@ -292,6 +422,7 @@ export function renderLegacyBrain({
     }
     setHoveredMemory(null);
     setHoveredRegion(null);
+    canvas.style.cursor = "default";
   }
 
   function onPointerUp(event) {
@@ -335,9 +466,12 @@ export function renderLegacyBrain({
   resizeObserver.observe(stage);
   resize();
 
-  function animate() {
+  let previousFrame = performance.now();
+  function animate(now = performance.now()) {
     if (disposed) return;
-    syncState();
+    const deltaSeconds = Math.min((now - previousFrame) / 1000, 0.1);
+    previousFrame = now;
+    syncState(deltaSeconds);
     controls.update();
     if (!reduceMotion.matches) {
       const elapsed = performance.now() * 0.001;
@@ -358,6 +492,7 @@ export function renderLegacyBrain({
       resizeObserver.disconnect();
       controls.dispose();
       shell?.dispose();
+      markerState?.dispose();
       model && disposeObject(model);
       memoryGroup.children.forEach(disposeObject);
       connectionGroup.children.forEach(disposeObject);
