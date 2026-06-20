@@ -27,8 +27,6 @@ const DEEP_REGIONS = new Set([
 // The segmented atlas needs an opaque neutral surface. Applying the legacy
 // OBJ's translucent cream material to every region makes overlapping anatomy
 // accumulate into a blown-out, noisy volume.
-const BASE_COLOR = new THREE.Color("#1a2035");
-const BASE_COLOR_VEC3 = BASE_COLOR.clone();
 const NEUTRAL_MATERIAL = Object.freeze({
   color: "#111827",
   emissive: "#14223a",
@@ -44,9 +42,9 @@ const NEUTRAL_COLOR = new THREE.Color(NEUTRAL_MATERIAL.color);
 // highlight, nodes, and activation tubes always read as the same hue. Keeping a
 // separate copy here would let the two drift apart.
 
-// Cached THREE.Color instances per region. The "base" tone is the lower end of
-// the activation gradient; "bright" pushes saturation/lightness up so heavier
-// activation visibly intensifies within the same hue family.
+// Cached THREE.Color instances per region. Region colors identify anatomy, but
+// activation is rendered as light within neutral tissue rather than a solid
+// coat of color. The brighter variant is reserved for explicit focus.
 const REGION_BASE_COLORS = new Map();
 const REGION_BRIGHT_COLORS = new Map();
 
@@ -484,13 +482,11 @@ export class AnatomicalBrainRenderer {
 
   /**
    * Applies a single consistent three-state treatment to one region mesh:
-   *   1. inactive  — warm translucent legacy shell; dimmed further when another
+   *   1. inactive  — neutral slate tissue; dimmed further when another
    *                  region holds focus.
-   *   2. activated — region hue by activation weight, brightness encodes the
-   *                  weight (emissive ∝ weight), near-solid opacity. Deep
-   *                  structures reveal by becoming visible rather than relying
-   *                  on heavy shell transparency.
-   *   3. focused   — brightest hue, full emissive, thin luminous rim edge.
+   *   2. activated — a restrained region tint and weight-driven emissive light.
+   *                  Deep structures reveal through a translucent X-ray pass.
+   *   3. focused   — stronger identity hue and a thin luminous rim edge.
    */
   #paintRegion(mesh, {
     active,
@@ -508,23 +504,23 @@ export class AnatomicalBrainRenderer {
     // Deep limbic structures stay hidden unless they are active or focused;
     // when revealed they read through the surrounding brain via transparency.
     mesh.visible = active || isFocused || !deep;
-    // Activated anatomy is an X-ray overlay: inner structures and regions on
-    // the far hemisphere must remain visible through the neutral shell.
+    // Only deep anatomy needs an X-ray pass. Cortical regions obey normal
+    // occlusion so the far hemisphere cannot bleed through the brain and turn
+    // the silhouette into overlapping color patches.
     mesh.renderOrder = isFocused ? 5 : active ? 4 : deep ? 2 : 1;
 
-    // Inactive structures use the legacy shell treatment. Activated structures
-    // retain the segmented renderer's original slate-to-region color mapping.
+    // Keep every active surface in the same slate tissue family. Weight changes
+    // the amount of colored light, while focus is the only state allowed to
+    // reveal most of the region's identity hue.
     const targetColor = active
       ? new THREE.Color().lerpColors(
-          BASE_COLOR_VEC3,
+          NEUTRAL_COLOR,
           base,
-          Math.min(1, 0.25 + displayWeight * 0.75),
+          0.12 + displayWeight * 0.18,
         )
       : NEUTRAL_COLOR.clone();
     if (isFocused) {
-      targetColor.lerp(bright, 0.45);
-    } else if (active) {
-      targetColor.lerp(bright, displayWeight * 0.4);
+      targetColor.lerp(bright, 0.48);
     }
     material.color.copy(targetColor);
 
@@ -535,8 +531,8 @@ export class AnatomicalBrainRenderer {
       setMaterialSide(material, THREE.FrontSide);
       material.emissive.copy(isFocused ? bright : base);
       material.emissiveIntensity = isFocused
-        ? 0.85
-        : 0.18 + displayWeight * 0.5;
+        ? 0.62
+        : 0.06 + displayWeight * 0.2;
     } else {
       material.roughness = NEUTRAL_MATERIAL.roughness;
       material.metalness = NEUTRAL_MATERIAL.metalness;
@@ -545,30 +541,29 @@ export class AnatomicalBrainRenderer {
       material.emissiveIntensity = deep ? 0 : NEUTRAL_MATERIAL.emissiveIntensity;
     }
 
-    // The neutral segmented shell stays opaque so adjacent anatomical meshes
-    // compose into one readable brain. Only activated anatomy is translucent.
+    // Cortical activation stays opaque and depth-tested: it is the same brain
+    // tissue receiving light, not a transparent overlay laid on top. Deep
+    // structures remain translucent so they can be seen inside the shell.
     if (deep && !active && !isFocused) {
       material.opacity = 0;
     } else if (deep && (active || isFocused)) {
-      material.opacity = isFocused ? 0.92 : 0.82;
+      material.opacity = isFocused ? 0.82 : 0.58 + displayWeight * 0.14;
     } else {
-      material.opacity = active || isFocused
-        ? 0.96
-        : NEUTRAL_MATERIAL.opacity;
+      material.opacity = NEUTRAL_MATERIAL.opacity;
     }
-    material.depthTest = !(active || isFocused);
-    material.depthWrite = !active && !isFocused && !deep;
-    material.transparent = active || isFocused || deep;
+    material.depthTest = !deep || (!active && !isFocused);
+    material.depthWrite = !deep;
+    material.transparent = deep;
 
     // Fresnel rim: a thin colored luminous boundary on the focused region.
     // A crisp neutral edge lift remains on every surface for hard contrast.
     if (isFocused) {
       uniforms.uRimColor.value.copy(bright);
-      uniforms.uRimIntensity.value = 1.3;
-      uniforms.uEdgeBoost.value = 1.25;
+      uniforms.uRimIntensity.value = 0.72;
+      uniforms.uEdgeBoost.value = 1.18;
     } else if (active) {
       uniforms.uRimColor.value.copy(base);
-      uniforms.uRimIntensity.value = 0.3 + displayWeight * 0.4;
+      uniforms.uRimIntensity.value = 0.08 + displayWeight * 0.14;
       uniforms.uEdgeBoost.value = 1.0;
     } else {
       uniforms.uRimColor.value.setHex(0xffffff);
@@ -577,14 +572,13 @@ export class AnatomicalBrainRenderer {
     }
 
     // Curvature "AO": full sulcus darkening on the neutral slate shell so the
-    // folds read with the deep contrast of the old brain; eased back when a
-    // region activates (so its hue isn't crushed back toward the dark base) and
-    // near-zero when focused (let emissive + rim define the lit form).
+    // folds read with the deep contrast of the old brain. Active and focused
+    // regions retain enough groove contrast to keep looking anatomical.
     if (isFocused) {
-      uniforms.uAoStrength.value = 0.2;
+      uniforms.uAoStrength.value = 0.42;
       uniforms.uAoSpread.value = 2.2;
     } else if (active) {
-      uniforms.uAoStrength.value = 0.35 - displayWeight * 0.2;
+      uniforms.uAoStrength.value = 0.62 - displayWeight * 0.12;
       uniforms.uAoSpread.value = 2.2;
     } else {
       uniforms.uAoStrength.value = 0.85;

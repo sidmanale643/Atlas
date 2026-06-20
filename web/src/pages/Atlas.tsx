@@ -53,7 +53,13 @@ const SCAFFOLD = `
           aria-label="Rotating three-dimensional model of a human brain"></canvas>
         <ul class="atlas-visual-key" aria-label="Atlas visual key">
           <li><i class="key-memory"></i><span>Memory</span></li>
-          <li><i class="key-region"></i><span>Region activation</span></li>
+          <li class="key-region-generic"><i class="key-region"></i><span>Region activation</span></li>
+          <li class="key-legacy-region key-legacy-prefrontal">
+            <i class="key-region"></i><span>Prefrontal cortex</span>
+          </li>
+          <li class="key-legacy-region key-legacy-association">
+            <i class="key-region"></i><span>Association cortex</span>
+          </li>
           <li class="key-legend-extra"><i class="key-path"></i><span>Contribution path</span></li>
           <li class="key-legend-extra"><i class="key-entity key-entity-person"></i><span>Person</span></li>
           <li class="key-legend-extra"><i class="key-entity key-entity-place"></i><span>Place</span></li>
@@ -107,7 +113,7 @@ export default function Atlas() {
     document.title = "Atlas · Atlas";
     const brainMode = new URLSearchParams(window.location.search).get("brain");
     const stage = document.getElementById("brainStage");
-    if (stage) stage.dataset.renderer = brainMode === "legacy" ? "legacy" : "atlas";
+    if (stage) stage.dataset.renderer = brainMode === "legacy" ? "atlas" : "legacy";
     // Boot the protected brain after the scaffold is in the DOM.
     import("../viz/brain/app.js");
 

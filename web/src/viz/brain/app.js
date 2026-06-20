@@ -19,18 +19,21 @@ import {
 import { createMemoryNodeState } from "./memory-placement.js";
 import { filterMemoriesForSearch } from "./memory-search.js";
 import { REGION_ANCHORS } from "./region-anchors.js";
+import { LEGACY_REGION_COLORS } from "../brain-legacy/region-colors.js";
 import {
   getHippocampalLaterality,
   getRegionContributions,
 } from "./region-mapper.js";
 
 const MAX_LENGTH = 180;
+const USE_LEGACY_BRAIN =
+  new URLSearchParams(window.location.search).get("brain") !== "legacy";
 const SHOW_REGION_ANCHORS =
   new URLSearchParams(window.location.search).get("debugRegions") === "1";
 const MIN_MEMORY_NODE_RADIUS = 0.09;
 const MAX_MEMORY_NODE_RADIUS = 0.16;
-const MIN_CONNECTION_RADIUS = 0.006;
-const MAX_CONNECTION_RADIUS = 0.032;
+const MIN_CONNECTION_RADIUS = 0.004;
+const MAX_CONNECTION_RADIUS = 0.02;
 const CONNECTION_SEGMENTS = 36;
 const FLOW_PARTICLE_COUNT = 3;
 const DEFAULT_MEMORY_COLOR = "#f4d8b4";
@@ -64,6 +67,12 @@ const RELATED_MEMORY_LIMIT = 5;
 const RELATED_MEMORY_SCORE_THRESHOLD = 0.65;
 const RELATED_LINK_COLOR = "#9ae6f5";
 
+function getRegionColor(region) {
+  return USE_LEGACY_BRAIN
+    ? LEGACY_REGION_COLORS[region]
+    : REGION_ANCHORS[region]?.color;
+}
+
 const form = document.querySelector("#memoryForm");
 const input = document.querySelector("#memoryInput");
 const characterCount = document.querySelector("#characterCount");
@@ -84,21 +93,28 @@ const searchInput = document.querySelector("#memorySearch");
 const searchStatus = document.querySelector("#memorySearchStatus");
 const resetFiltersButton = document.querySelector("#resetFiltersButton");
 
+if (USE_LEGACY_BRAIN) {
+  brainStage.style.setProperty(
+    "--legacy-prefrontal-color",
+    LEGACY_REGION_COLORS.prefrontal,
+  );
+  brainStage.style.setProperty(
+    "--legacy-association-color",
+    LEGACY_REGION_COLORS.associationCortex,
+  );
+}
+
 let memories = [];
 let selectedMemoryId = null;
 let hoveredMemoryId = null;
 let selectedRegion = null;
 let hoveredRegion = null;
+let selectedRegionMemoryId = null;
 let extracting = false;
 let regionMarkers = new Map();
 let regionScenePositions = new Map();
-// Track whether measured region positions have been loaded and applied to the
-// 3D markers. Before this flips true, placement must defer to the fallback
-// hardcoded anchors — and node/connection/label rendering is skipped entirely
-// so nothing renders at stale coordinates while the GLTF model is still loading.
-let regionPositionsReady = false;
 // Set whenever regionScenePositions changes; consumed by updateRegionMarkers()
-// to re-anchored markers to the measured centers before they're shown.
+// to re-anchor markers to the measured centers before they're shown.
 let regionMarkerPositionsDirty = false;
 let regionLabelButtons = new Map();
 let anatomicalBrainRenderer = null;
@@ -677,7 +693,7 @@ function render() {
   renderDetail();
   updateClearSelectionButton();
 
-  if (!regionPositionsReady) return;
+  if (!regionScenePositions.size) return;
 
   memoryNodeState = createMemoryNodeState(filtered, regionScenePositions);
   renderMemoryNodes();
@@ -701,6 +717,7 @@ function selectMemory(
   selectedMemoryId = id;
   hoveredRegion = null;
   selectedRegion = memoryNodeState.get(id)?.core.region || null;
+  selectedRegionMemoryId = id;
   if (brainControls) brainControls.autoRotate = false;
   if (recordHistory) {
     navigationHistory = pushNavigation(navigationHistory, {
@@ -737,6 +754,7 @@ function clearSelection() {
   resetRelatedMemoryState();
   selectedMemoryId = null;
   selectedRegion = null;
+  selectedRegionMemoryId = null;
   hoveredRegion = null;
   cameraFocus = null;
   renderDetail();
@@ -753,23 +771,18 @@ function clearSelection() {
 function syncSelectedRegion() {
   if (!selectedMemoryId) {
     selectedRegion = null;
+    selectedRegionMemoryId = null;
     return;
   }
 
-  const state = memoryNodeState.get(selectedMemoryId);
-  if (!state) {
-    selectedRegion = null;
-    return;
-  }
+  // Region focus belongs to a memory selection, not to a render pass. Preserve
+  // the user's pinned region while filters or background data updates rebuild
+  // the scene; only choose a new default when the selected memory itself changes.
+  if (selectedRegionMemoryId === selectedMemoryId) return;
 
-  // If the user's pinned region is no longer part of this memory's activations
-  // (e.g. after a background re-extraction refresh), clear the pin rather than
-  // silently teleporting focus to the dominant region. A null selectedRegion is
-  // the natural whole-memory view (no specific region pinned), which is far
-  // less surprising than the highlight jumping to a region the user didn't pick.
-  if (selectedRegion && !state.activations.some(({ region }) => region === selectedRegion)) {
-    selectedRegion = null;
-  }
+  selectedRegionMemoryId = selectedMemoryId;
+  const memory = memories.find(({ id }) => id === selectedMemoryId);
+  selectedRegion = getSortedRegions(memory)[0]?.region || null;
 }
 
 function getActiveMemoryId() {
@@ -779,7 +792,8 @@ function getActiveMemoryId() {
 
 function getFocusedRegion() {
   if (entityLens) return null;
-  return hoveredRegion ?? selectedRegion ?? null;
+  if (hoveredRegion) return hoveredRegion;
+  return getActiveMemoryId() === selectedMemoryId ? selectedRegion : null;
 }
 
 function setHoveredRegion(region) {
@@ -797,6 +811,7 @@ function selectRegion(region) {
   }
 
   selectedRegion = region;
+  selectedRegionMemoryId = selectedMemoryId;
   hoveredRegion = null;
   updateRegionMarkers();
   updateActivationConnections();
@@ -1511,7 +1526,7 @@ function createRegionRoleTable(memory) {
     areaCell.scope = "row";
     const areaButton = document.createElement("button");
     areaButton.type = "button";
-    areaButton.style.setProperty("--region-color", anchor.color);
+    areaButton.style.setProperty("--region-color", getRegionColor(region));
     areaButton.textContent = anchor.label;
     areaButton.addEventListener("click", () => selectRegion(region));
     areaCell.append(areaButton);
@@ -1583,7 +1598,7 @@ function renderRegionExplanation(memory) {
     const name = document.createElement("span");
     name.className = "activation-name";
     const swatch = document.createElement("i");
-    swatch.style.backgroundColor = anchor.color;
+    swatch.style.backgroundColor = getRegionColor(region);
     const label = document.createElement("span");
     label.textContent = anchor.label;
     name.append(swatch, label);
@@ -1596,7 +1611,7 @@ function renderRegionExplanation(memory) {
     meter.className = "activation-meter";
     const fill = document.createElement("span");
     fill.style.width = formatPercent(weight);
-    fill.style.backgroundColor = anchor.color;
+    fill.style.backgroundColor = getRegionColor(region);
     meter.append(fill);
 
     const reasons = document.createElement("ul");
@@ -1739,7 +1754,9 @@ function updateRegionInspectorSelection({ revealSelected = false } = {}) {
       ?.filter(({ weight }) => Number(weight) > 0)
       .map(({ region }) => region) || [],
   );
-  const inspectorFocused = focusedRegion && inspectorRegions.has(focusedRegion)
+  const inspectorFocused = getActiveMemoryId() === selectedMemoryId
+    && focusedRegion
+    && inspectorRegions.has(focusedRegion)
     ? focusedRegion
     : null;
 
@@ -1992,6 +2009,12 @@ function updateRegionMarkers() {
 
   regionMarkers.forEach((marker) => { marker.visible = false; });
 
+  if (anatomicalBrainRenderer && !regionScenePositions.size) {
+    anatomicalBrainRenderer.clearActivations();
+    anatomicalBrainRenderer.setSelectedRegion(null).setHoveredRegion(null);
+    return;
+  }
+
   if (entityLens) {
     anatomicalBrainRenderer?.clearActivations();
     anatomicalBrainRenderer?.setSelectedRegion(null).setHoveredRegion(null);
@@ -2012,7 +2035,9 @@ function updateRegionMarkers() {
   });
 
   anatomicalBrainRenderer?.setMemoryActivations(memory.regions);
-  anatomicalBrainRenderer?.setSelectedRegion(selectedRegion);
+  anatomicalBrainRenderer?.setSelectedRegion(
+    activeMemoryId === selectedMemoryId ? selectedRegion : null,
+  );
   anatomicalBrainRenderer?.setHoveredRegion(hoveredRegion);
 }
 
@@ -2022,7 +2047,7 @@ function updateRegionMarkers() {
 // truth for marker position after load — previously markers were positioned
 // exactly once in the GLTF onLoad callback and could go stale.
 function syncRegionMarkerPositions() {
-  if (!regionMarkerPositionsDirty || !anatomicalBrainRenderer) return;
+  if (!regionMarkerPositionsDirty || !regionScenePositions.size) return;
   regionMarkerPositionsDirty = false;
   for (const [region, measured] of regionScenePositions) {
     const marker = regionMarkers.get(region);
@@ -2033,6 +2058,17 @@ function syncRegionMarkerPositions() {
 
 function updateActivationConnections() {
   if (!activationConnectionGroup) return;
+
+  if (anatomicalBrainRenderer && !regionScenePositions.size) {
+    memoryConnections.forEach((connection) => {
+      connection.userData.tubeMaterial.opacity = 0;
+      connection.userData.glowMaterial.opacity = 0;
+      connection.userData.flowParticles.forEach((particle) => {
+        particle.visible = false;
+      });
+    });
+    return;
+  }
 
   if (entityLens) {
     memoryConnections.forEach((connection) => {
@@ -2093,6 +2129,14 @@ function createRegionLabel(label, color) {
 }
 
 function updateRegionLabels() {
+  if (anatomicalBrainRenderer && !regionScenePositions.size) {
+    regionLabels.replaceChildren();
+    regionLabelButtons = new Map();
+    regionLabels.dataset.memoryId = "";
+    regionLabels.hidden = true;
+    return;
+  }
+
   if (entityLens) {
     regionLabels.replaceChildren();
     regionLabelButtons = new Map();
@@ -2140,7 +2184,7 @@ function updateRegionLabels() {
     button.dataset.region = region;
     button.dataset.role = anchor.role;
     if (DEEP_BRAIN_REGIONS.has(region)) button.dataset.deep = "true";
-    button.style.setProperty("--region-color", anchor.color);
+    button.style.setProperty("--region-color", getRegionColor(region));
     button.style.setProperty(
       "--region-weight",
       THREE.MathUtils.clamp(Number(weight) || 0, 0, 1).toFixed(3),
@@ -2168,6 +2212,7 @@ function updateRegionLabels() {
 }
 
 function updateRegionLabelPositions(camera) {
+  if (anatomicalBrainRenderer && !regionScenePositions.size) return;
   if (regionLabels.hidden || !regionLabelButtons.size) return;
 
   const { width, height } = brainStage.getBoundingClientRect();
@@ -2233,6 +2278,7 @@ function updateRegionLabelPositions(camera) {
 
 function renderMemoryNodes() {
   if (!memoryNodeGroup) return;
+  if (anatomicalBrainRenderer && !regionScenePositions.size) return;
 
   disposeGroupContents(memoryNodeGroup);
   disposeGroupContents(activationConnectionGroup);
@@ -2361,7 +2407,7 @@ function createRelatedMemoryLink(startPosition, endPosition, memoryId, score) {
   );
   const curve = new THREE.QuadraticBezierCurve3(start, control, end);
   const strength = THREE.MathUtils.clamp(Number(score) || 0, 0, 1);
-  const radius = THREE.MathUtils.lerp(0.006, 0.015, strength);
+  const radius = THREE.MathUtils.lerp(0.004, 0.01, strength);
   const material = new THREE.MeshBasicMaterial({
     color: RELATED_LINK_COLOR,
     transparent: true,
@@ -2401,6 +2447,8 @@ function disposeGroupContents(group) {
 }
 
 function createActivationConnections(memoryId, state) {
+  if (anatomicalBrainRenderer && !regionScenePositions.size) return;
+
   const start = new THREE.Vector3(...state.core.position);
   state.activations.forEach((activation) => {
     const anchor = REGION_ANCHORS[activation.region];
@@ -2429,7 +2477,7 @@ function createActivationConnections(memoryId, state) {
       if (!target.position) return;
       createActivationConnection(memoryId, activation.region, start, {
         ...target,
-        color: anchor.color,
+        color: getRegionColor(activation.region),
       });
     });
   });
@@ -2950,7 +2998,7 @@ function animateMemoryNodes(elapsed) {
 }
 
 function focusAnatomicalRegion(region) {
-  if (!regionPositionsReady || !region || !brainCamera || !brainControls || !anatomicalBrainRenderer) return;
+  if (!regionScenePositions.size || !region || !brainCamera || !brainControls || !anatomicalBrainRenderer) return;
   const focus = anatomicalBrainRenderer.focusRegion(region, {
     camera: brainCamera,
     padding: 2.2,
@@ -3124,7 +3172,7 @@ function formatRelativeDate(value) {
 }
 
 function renderBrainModel() {
-  if (new URLSearchParams(window.location.search).get("brain") === "legacy") {
+  if (USE_LEGACY_BRAIN) {
     renderLegacyBrain({
       canvas: brainCanvas,
       stage: brainStage,
@@ -3371,11 +3419,10 @@ function renderBrainModel() {
         }
       }
 
-      // Measured positions are now authoritative. Flag dirty so
-      // syncRegionMarkerPositions() re-anchors markers on the next update, and
-      // ready so render() stops deferring node/connection/label placement.
+      // Measured positions are now authoritative. Re-anchor markers before any
+      // labels or activation paths can project from them.
       regionMarkerPositionsDirty = true;
-      regionPositionsReady = true;
+      syncRegionMarkerPositions();
 
       modelStatus.hidden = true;
       brainStage.dataset.modelState = "ready";

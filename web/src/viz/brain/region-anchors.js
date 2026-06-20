@@ -1,26 +1,18 @@
 export const REGION_COLORS = Object.freeze({
-  // Warm amber — binds context (who/where/when).
-  hippocampus: "#ffb547",
-  // Sky blue — active recall, planning, working control.
-  prefrontal: "#5ec8ff",
-  // Hot pink — emotional salience.
-  amygdala: "#ff5d8f",
-  // Violet — semantic knowledge.
-  temporalCortex: "#9d7bff",
-  // Teal — spatial attention.
-  parietalCortex: "#3ddcc4",
-  // Deep indigo — habits, procedural patterns.
-  basalGanglia: "#6c5cff",
-  // Green — timing, precision.
-  cerebellum: "#5ed97a",
-  // Orange — physical action.
-  motorCortex: "#ff8a3d",
-  // Magenta — internal/bodily state.
-  insula: "#e667d4",
-  // Slate blue — multi-modal integration.
-  associationCortex: "#7a8aa3",
-  // Cyan — spatial navigation.
-  entorhinal: "#42c8e6",
+  // These are identity colors for labels, links, and focused anatomy. They are
+  // deliberately pastel: the renderer tints neutral tissue with them instead
+  // of painting each active region as a fully saturated block.
+  hippocampus: "#ffd38a",
+  prefrontal: "#8edfff",
+  amygdala: "#ff8fa8",
+  temporalCortex: "#b9a7ff",
+  parietalCortex: "#7ee8d3",
+  basalGanglia: "#978cff",
+  cerebellum: "#9ce4ba",
+  motorCortex: "#ffad8a",
+  insula: "#e99fd1",
+  associationCortex: "#d9e4e8",
+  entorhinal: "#80d8d0",
 });
 
 export const REGION_ANCHORS = Object.freeze({
