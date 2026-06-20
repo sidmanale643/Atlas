@@ -21,6 +21,7 @@
     "dev": "node --watch src/server.js",
     "dev:web": "vite",
     "build:web": "vite build",
+    "build:brain-atlas": "node scripts/build-brain-atlas.js",
     "mcp": "node src/mcp-server.js",
     "cli": "node src/cli.js",
     "qdrant:sync": "node scripts/sync-memory-vectors.js",
@@ -44,6 +45,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.4.0",
+    "@gltf-transform/extensions": "^4.4.0",
+    "@gltf-transform/functions": "^4.4.0",
     "@types/d3": "^7.4.3",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -51,6 +55,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "d3": "^7.9.0",
     "framer-motion": "^11.18.2",
+    "meshoptimizer": "^0.24.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
