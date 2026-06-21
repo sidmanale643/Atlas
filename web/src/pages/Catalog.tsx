@@ -912,147 +912,150 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
 
     const related = relatedMemories[String(id)];
     const relatedLinks = related?.links || [];
+    const entities = memory.entities || [];
+    const relationships = memory.relationships || [];
+    const regions = [...(memory.regions || [])].sort((a, b) => b.weight - a.weight);
+    const summary = extraction.summary || memory.summary || "Not available";
+    const labels = [memory.type, ...(memory.tags || [])].filter(Boolean);
 
     return (
-      <div className={styles.detailCards}>
-        {/* Memory Core */}
-        <section className={styles.detailCard}>
-          <h3 className={styles.detailCardTitle}>
-            <span className={styles.detailIcon} aria-hidden="true">CORE</span>
-            Memory Core
-          </h3>
-          <div className={styles.detailCardBody}>
-            <div className={styles.detailField}>
-              <div className={styles.detailFieldIcon} aria-hidden="true">TXT</div>
-              <div>
-                <span className={styles.detailFieldLabel}>Raw Memory</span>
-                <p className={styles.detailFieldValue}>{memory.raw_text || "Not available"}</p>
-              </div>
+      <div className={styles.memoryDetail}>
+        <div className={styles.detailTopline}>
+          <span>Memory / {capitalize(memory.type)}</span>
+          <button type="button" className={styles.closeDetail} onClick={() => setExpandedId(null)}>
+            Close detail <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <section className={styles.corePanel}>
+          <div className={styles.coreHeading}>
+            <span className={styles.coreLabel}>Core memory</span>
+            <span className={styles.sourceBadge}>{memory.source === "mcp" ? "Agent" : "User"}</span>
+          </div>
+          <p className={styles.rawMemory}>{memory.raw_text || "Not available"}</p>
+          <div className={styles.summaryBlock}>
+            <span className={styles.detailFieldLabel}>Summary</span>
+            <p>{summary}</p>
+          </div>
+          <div className={styles.coreFooter}>
+            <div className={styles.detailChips}>
+              {labels.map((label, index) => (
+                <span key={`${label}-${index}`} className={styles.detailChip}>{humanize(label)}</span>
+              ))}
             </div>
-            <div className={styles.detailField}>
-              <div className={styles.detailFieldIcon} aria-hidden="true">SUM</div>
-              <div>
-                <span className={styles.detailFieldLabel}>Summary</span>
-                <p className={`${styles.detailFieldValue} ${styles.detailSummaryHighlight}`}>
-                  {extraction.summary || memory.summary || "Not available"}
-                </p>
-              </div>
-            </div>
-            {meta.model && (
-              <div className={styles.detailFieldMeta}>
-                <span>Model: {meta.model}</span>
-                {meta.schema_version != null && <span>Schema: {meta.schema_version}</span>}
-                {extraction.salience != null && <span>Salience: {formatPercent(extraction.salience)}</span>}
-              </div>
-            )}
+            <span>Added {formatDate(memory.created_at || memory.ingestion_date)}</span>
           </div>
         </section>
 
-        {/* Entities */}
-        <section className={styles.detailCard}>
-          <h3 className={styles.detailCardTitle}>
-            <span className={styles.detailIcon} aria-hidden="true">ENT</span>
-            Entities
-          </h3>
-          <div className={styles.detailCardBody}>
-            {(memory.entities || []).length === 0 ? (
-              <p className={styles.detailMsg}>No entities extracted.</p>
-            ) : (
-              <div className={styles.detailChips}>
-                {memory.entities.map((e) => (
-                  <span key={e.id} className={styles.detailChip}>
-                    {e.canonical_name}
-                    <span className={styles.detailChipKind}>[{e.kind}]</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Relationships */}
-        <section className={styles.detailCard}>
-          <h3 className={styles.detailCardTitle}>
-            <span className={styles.detailIcon} aria-hidden="true">REL</span>
-            Relationships
-          </h3>
-          <div className={styles.detailCardBody}>
-            {(memory.relationships || []).length === 0 ? (
-              <p className={styles.detailMsg}>No relationships found.</p>
-            ) : (
-              <ul className={styles.detailRelList}>
-                {memory.relationships.map((r) => {
-                  const src = r.source_name || r.source?.canonical_name;
-                  const tgt = r.target_name || r.target?.canonical_name;
-                  return (
-                    <li key={r.id}>
-                      {src} <span className={styles.detailPredicate}>{r.predicate}</span> {tgt}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </section>
-
-        {/* Related Memories */}
-        <section className={styles.detailCard}>
-          <h3 className={styles.detailCardTitle}>
-            <span className={styles.detailIcon} aria-hidden="true">LNK</span>
-            Related Memories
-          </h3>
-          <div className={styles.detailCardBody}>
-            {related?.loading && (
-              <p className={styles.detailMsg}>Loading related memories…</p>
-            )}
-            {!related?.loading && relatedLinks.length === 0 && (
-              <p className={styles.detailMsg}>No related memories found.</p>
-            )}
-            {relatedLinks.map((link) => (
-              <article key={link.memory.id} className={styles.relatedCard}>
-                <div className={styles.relatedHeader}>
-                  <span className={styles.relatedTitle}>
-                    {link.memory.summary || link.memory.title || link.memory.raw_text}
-                  </span>
-                  <span className={styles.relatedScore}>
-                    {Math.round(link.score * 100)}% Linked
-                  </span>
+        <div className={styles.memoryDetailGrid}>
+          <div className={styles.detailColumn}>
+            {(relationships.length > 0 || entities.length > 0) && (
+              <section className={styles.detailPanel}>
+                <h3 className={styles.panelTitle}>Semantic structure</h3>
+                <div className={styles.panelBody}>
+                  {relationships.length > 0 ? (
+                    <div className={styles.semanticList}>
+                      {relationships.map((relationship) => {
+                        const source = relationship.source_name || relationship.source?.canonical_name;
+                        const target = relationship.target_name || relationship.target?.canonical_name;
+                        return (
+                          <div key={relationship.id} className={styles.semanticRow}>
+                            <span className={styles.semanticNode}>{source || "Unknown"}</span>
+                            <span className={styles.semanticArrow} aria-hidden="true">→</span>
+                            <span className={`${styles.semanticNode} ${styles.semanticPredicate}`}>
+                              {humanize(relationship.predicate)}
+                            </span>
+                            <span className={styles.semanticArrow} aria-hidden="true">→</span>
+                            <span className={styles.semanticNode}>{target || "Unknown"}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className={styles.detailChips}>
+                      {entities.map((entity) => (
+                        <span key={entity.id} className={styles.detailChip}>
+                          {entity.canonical_name}
+                          <span className={styles.detailChipKind}>{entity.kind}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className={styles.relatedTags}>
-                  {link.reasons.slice(0, 4).map((reason, i) => (
-                    <span key={i} className={styles.relatedTag}>{reason}</span>
+              </section>
+            )}
+
+            {regions.length > 0 && (
+              <section className={styles.detailPanel}>
+                <h3 className={styles.panelTitle}>Brain regions</h3>
+                <div className={`${styles.panelBody} ${styles.regionList}`}>
+                  {regions.map((region) => (
+                    <div key={region.region} className={styles.regionRow}>
+                      <div className={styles.regionMeta}>
+                        <span>{humanize(region.region)}</span>
+                        <span>{formatPercent(region.weight)}</span>
+                      </div>
+                      <div className={styles.regionTrack}>
+                        <span style={{ width: `${Math.max(0, Math.min(1, region.weight)) * 100}%` }} />
+                      </div>
+                    </div>
                   ))}
                 </div>
-                <div className={styles.relatedMeta}>
-                  {link.semanticSimilarity != null && (
-                    <span>{Math.round(link.semanticSimilarity * 100)}% Semantic Similarity</span>
-                  )}
-                  <span>·</span>
-                  <span>{link.memory.source === "mcp" ? "Agent Memory" : "User Memory"}</span>
-                </div>
-              </article>
-            ))}
+              </section>
+            )}
           </div>
-        </section>
 
-        {/* Brain regions (compact) */}
-        {(memory.regions || []).length > 0 && (
-          <section className={styles.detailCard}>
-            <h3 className={styles.detailCardTitle}>
-              <span className={styles.detailIcon} aria-hidden="true">BRN</span>
-              Brain Regions
-            </h3>
-            <div className={styles.detailCardBody}>
-              <div className={styles.detailChips}>
-                {memory.regions.map((r) => (
-                  <span key={r.region} className={styles.detailChip}>
-                    {humanize(r.region)}
-                    <span className={styles.detailChipKind}>{formatPercent(r.weight)}</span>
-                  </span>
+          <div className={styles.detailColumn}>
+            <section className={styles.detailPanel}>
+              <h3 className={styles.panelTitle}>Memory profile</h3>
+              <div className={styles.panelBody}>
+                <dl className={styles.profileList}>
+                  <div><dt>Type</dt><dd>{capitalize(memory.type)}</dd></div>
+                  <div><dt>Confidence</dt><dd>{formatPercent(memory.confidence)}</dd></div>
+                  {extraction.salience != null && <div><dt>Salience</dt><dd>{formatPercent(extraction.salience)}</dd></div>}
+                  {meta.schema_version != null && <div><dt>Schema</dt><dd>v{meta.schema_version}</dd></div>}
+                  {meta.model && <div><dt>Model</dt><dd>{meta.model}</dd></div>}
+                  <div><dt>ID</dt><dd title={memory.id}>{memory.id}</dd></div>
+                </dl>
+              </div>
+            </section>
+
+            <section className={styles.detailPanel}>
+              <h3 className={styles.panelTitle}>Related memories</h3>
+              <div className={styles.panelBody}>
+                {related?.loading && <p className={styles.detailMsg}>Loading related memories…</p>}
+                {!related?.loading && relatedLinks.length === 0 && (
+                  <div className={styles.emptyRelated}>
+                    <span aria-hidden="true">○</span>
+                    <p>No related memories yet.</p>
+                    <small>Connections appear when memories share meaning or entities.</small>
+                  </div>
+                )}
+                {relatedLinks.map((link) => (
+                  <article key={link.memory.id} className={styles.relatedCard}>
+                    <div className={styles.relatedHeader}>
+                      <span className={styles.relatedTitle}>
+                        {link.memory.summary || link.memory.title || link.memory.raw_text}
+                      </span>
+                      <span className={styles.relatedScore}>{Math.round(link.score * 100)}% linked</span>
+                    </div>
+                    <div className={styles.relatedTags}>
+                      {link.reasons.slice(0, 4).map((reason, index) => (
+                        <span key={index} className={styles.relatedTag}>{reason}</span>
+                      ))}
+                    </div>
+                  </article>
                 ))}
               </div>
-            </div>
-          </section>
+            </section>
+          </div>
+        </div>
+
+        {rawExtraction && (
+          <details className={styles.rawExtraction}>
+            <summary>Raw extraction data</summary>
+            <pre>{JSON.stringify(rawExtraction, null, 2)}</pre>
+          </details>
         )}
       </div>
     );
