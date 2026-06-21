@@ -82,7 +82,7 @@ import {
 const log = createLogger("server");
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "public");
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const zSourceRevision = z.object({
   text: z.string().min(1).max(2000),
   author: z.string().trim().min(1).max(200).optional(),
