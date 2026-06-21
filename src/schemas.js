@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SEMANTIC_EXTRACTION_SCHEMA_VERSION = 3;
+export const SEMANTIC_EXTRACTION_SCHEMA_VERSION = 4;
 export const COGNITIVE_ANNOTATION_SCHEMA_VERSION = 1;
 export const SEMANTIC_SCHEMA_VERSION = SEMANTIC_EXTRACTION_SCHEMA_VERSION;
 export const COGNITIVE_SCHEMA_VERSION = COGNITIVE_ANNOTATION_SCHEMA_VERSION;
@@ -84,6 +84,18 @@ export const MemoryTypeSchema = z.object({
   weight: z.number().min(0).max(1),
 });
 
+export const MemoryCategorySchema = z.enum([
+  "relationship",
+  "preference",
+  "fact",
+  "decision",
+  "learning",
+  "event",
+  "instruction",
+  "observation",
+  "error",
+]);
+
 export const ContentCueSchema = z.object({
   kind: z.enum(["verbal", "spatial"]),
   weight: z.number().min(0).max(1),
@@ -115,8 +127,8 @@ export const RelationshipSchema = z.object({
   evidence: z.string(),
 });
 
-// V2 remains exported so stored extractions can be classified by shape during
-// migration. New extraction and persistence code must use the V3 schemas below.
+// The legacy schema remains exported so stored extractions can be classified by
+// shape during migration. New extraction and persistence use the schemas below.
 export const LegacyAtomicMemorySchema = z.object({
   text: z.string().trim().min(1),
   summary: z.string().trim().min(1),
@@ -252,6 +264,7 @@ export const V3RelationshipSchema = z.object({
 export const AtomicMemorySchema = z.object({
   text: V3TextSchema(2000),
   summary: V3TextSchema(500),
+  category: MemoryCategorySchema.optional(),
   evidenceSpans: z.array(EvidenceSpanSchema).min(1).max(5),
   durability: DurabilitySchema,
   boundaryReason: V3TextSchema(500),
@@ -286,6 +299,7 @@ const LlmEvidenceSpanSchema = z.object({
 
 const LlmAtomicMemorySchema = z.object({
   ...AtomicMemorySchema.shape,
+  category: MemoryCategorySchema,
   evidenceSpans: z.array(LlmEvidenceSpanSchema).min(1).max(5),
 }).strict();
 

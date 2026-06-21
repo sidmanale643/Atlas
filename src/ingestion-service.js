@@ -350,17 +350,29 @@ async function resolveModel(dependencies) {
 }
 
 function atomMetadata(atom, metadata) {
-  const extractedType = dominantType(atom.types);
+  const extractedType = atom.category
+    || metadata.type
+    || categoryFromCognitiveType(atom.types);
   return {
     ...DEFAULT_METADATA,
     type: metadata.forceType && metadata.type
       ? metadata.type
-      : extractedType || metadata.type || "fact",
+      : extractedType,
     title: atom.summary || atom.text.slice(0, 50),
     confidence: atom.durability?.confidence ?? DEFAULT_METADATA.confidence,
     tags: Array.isArray(metadata.tags) ? metadata.tags : [],
     ...(metadata.ownerHash ? { ownerHash: metadata.ownerHash } : {}),
   };
+}
+
+function categoryFromCognitiveType(types = []) {
+  switch (dominantType(types)) {
+    case "episodic": return "event";
+    case "procedural": return "learning";
+    case "emotional": return "observation";
+    case "working": return "instruction";
+    default: return "fact";
+  }
 }
 
 function dominantType(types = []) {
