@@ -198,3 +198,8 @@ Runs `node --test tests/*.test.js`. Built-in test runner; tests import directly 
 ## License
 
 MIT.
+
+The optimized brain atlas is derived from the Human Reference Atlas v1.3
+3D Male Allen Brain by the HuBMAP Consortium, licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Source and modification
+details are recorded in `public/assets/brain-atlas.LICENSE.txt`.

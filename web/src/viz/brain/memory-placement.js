@@ -1,9 +1,22 @@
 import { getRegionAnchor } from "./region-anchors.js";
 
-const MIN_REGION_INSET = 0.34;
-const REGION_INSET_RANGE = 0.14;
-const MIN_TANGENT_OFFSET = 0.04;
-const TANGENT_OFFSET_RANGE = 0.14;
+// Scatter is expressed as a fraction of each region's measured radius so the
+// cluster fits *inside* the region volume regardless of how the brain model
+// was scaled. These were back-derived from the previous fixed offsets
+// (MIN_REGION_INSET 0.34, range 0.14; tangent 0.04, range 0.14) assuming a
+// ~1.0 unit region radius, then tuned to sit comfortably within the volume.
+const INSET_FRACTION_MIN = 0.18;
+const INSET_FRACTION_RANGE = 0.22;
+const TANGENT_FRACTION_MIN = 0.08;
+const TANGENT_FRACTION_RANGE = 0.32;
+
+// Fallback radius used before the anatomical model has loaded (or for regions
+// we could not measure). Keeps the pre-load layout roughly consistent with the
+// hardcoded anchor coordinate space.
+const FALLBACK_REGION_RADIUS = 1.0;
+// Soft outer safety clamp so a mis-measured (huge) radius can never fling a
+// memory far outside the brain. Generous, only catches bad data.
+const MAX_SCATTER_RADIUS = 2.2;
 
 export function getDominantRegion(regions) {
   let dominant = null;
@@ -29,22 +42,100 @@ export function getDominantRegion(regions) {
   return dominant?.region || null;
 }
 
-export function calculateMemoryPosition(memoryId, regions) {
+/**
+ * Resolves the anchor position to use for a region.
+ *
+ * When `regionPositions` is supplied (the measured centers from the loaded
+ * anatomical model), the real center is preferred so memories land inside the
+ * actual mesh. The hardcoded REGION_ANCHORS positions are only a fallback for
+ * the pre-load window or for regions that could not be measured.
+ */
+function resolveAnchorPosition(region, regionPositions) {
+  const measured = regionPositions?.get(region);
+  if (measured?.center) return { position: measured.center, radius: measured.radius };
+  const anchor = getRegionAnchor(region);
+  if (!anchor) return null;
+  return { position: anchor.position, radius: FALLBACK_REGION_RADIUS };
+}
+
+function resolveHippocampusPosition(activation, regionPositions) {
+  if (activation?.region !== "hippocampus") return null;
+
+  const anchor = getRegionAnchor("hippocampus");
+  const measured = regionPositions?.get("hippocampus");
+  const { left, right } = activation.hemispheres || {};
+
+  // Prefer the measured hemisphere centers from the loaded model.
+  if (measured?.left && measured?.right && Number.isFinite(left) && Number.isFinite(right)) {
+    const total = left + right;
+    if (total > 0) {
+      const leftShare = left / total;
+      const rightShare = right / total;
+      return {
+        position: measured.left.map(
+          (coordinate, index) =>
+            coordinate * leftShare + measured.right[index] * rightShare,
+        ),
+        radius: measured.radius,
+      };
+    }
+  }
+
+  // Fallback to the hardcoded hemisphere anchors.
+  if (
+    anchor?.hemispherePositions &&
+    Number.isFinite(left) &&
+    Number.isFinite(right)
+  ) {
+    const total = left + right;
+    if (total > 0) {
+      const leftShare = left / total;
+      const rightShare = right / total;
+      return {
+        position: anchor.hemispherePositions.left.map(
+          (coordinate, index) =>
+            coordinate * leftShare
+            + anchor.hemispherePositions.right[index] * rightShare,
+        ),
+        radius: FALLBACK_REGION_RADIUS,
+      };
+    }
+  }
+
+  return null;
+}
+
+export function calculateMemoryPosition(memoryId, regions, regionPositions) {
   const dominantRegion = getDominantRegion(regions);
   const dominantActivation = (regions || []).find(
     ({ region }) => region === dominantRegion,
   );
+
+  const override = resolveHippocampusPosition(dominantActivation, regionPositions);
   return calculateRegionPosition(
     memoryId,
     dominantRegion,
-    getActivationAnchorPosition(dominantActivation),
+    override,
+    regionPositions,
   );
 }
 
-export function calculateRegionPosition(memoryId, region, positionOverride) {
-  const anchor = getRegionAnchor(region);
-  if (!anchor) return null;
-  const anchorPosition = positionOverride || anchor.position;
+export function calculateRegionPosition(
+  memoryId,
+  region,
+  positionOverride,
+  regionPositions,
+) {
+  const resolved =
+    positionOverride || resolveAnchorPosition(region, regionPositions);
+  if (!resolved) return null;
+
+  const anchorPosition = resolved.position;
+  // Cap the radius so a bad measurement can't scatter memories far outside.
+  const regionRadius = Math.min(
+    Number.isFinite(resolved.radius) ? resolved.radius : FALLBACK_REGION_RADIUS,
+    MAX_SCATTER_RADIUS,
+  );
 
   const outward = normalize(anchorPosition);
   const reference =
@@ -53,51 +144,29 @@ export function calculateRegionPosition(memoryId, region, positionOverride) {
   const tangentB = cross(outward, tangentA);
 
   const angle = hashUnit(`${memoryId}:${region}:angle`) * Math.PI * 2;
+  // Scatter offsets scale with the region's real extent so the cluster stays
+  // inside the region volume rather than spilling past the brain surface.
   const tangentDistance =
-    MIN_TANGENT_OFFSET +
-    hashUnit(`${memoryId}:${region}:distance`) * TANGENT_OFFSET_RANGE;
+    (TANGENT_FRACTION_MIN
+      + hashUnit(`${memoryId}:${region}:distance`) * TANGENT_FRACTION_RANGE)
+    * regionRadius;
   const inset =
-    MIN_REGION_INSET +
-    hashUnit(`${memoryId}:${region}:inset`) * REGION_INSET_RANGE;
+    (INSET_FRACTION_MIN
+      + hashUnit(`${memoryId}:${region}:inset`) * INSET_FRACTION_RANGE)
+    * regionRadius;
   const tangentX = Math.cos(angle) * tangentDistance;
   const tangentY = Math.sin(angle) * tangentDistance;
 
-  const position = anchorPosition.map(
+  return anchorPosition.map(
     (coordinate, index) =>
       coordinate +
       outward[index] * -inset +
       tangentA[index] * tangentX +
       tangentB[index] * tangentY,
   );
-
-  return clampToBrainBoundary(position);
 }
 
-function getActivationAnchorPosition(activation) {
-  if (activation?.region !== "hippocampus") return null;
-
-  const anchor = getRegionAnchor("hippocampus");
-  const { left, right } = activation.hemispheres || {};
-  const total = left + right;
-  if (
-    !anchor?.hemispherePositions
-    || !Number.isFinite(left)
-    || !Number.isFinite(right)
-    || total <= 0
-  ) {
-    return anchor?.position || null;
-  }
-
-  const leftShare = left / total;
-  const rightShare = right / total;
-  return anchor.hemispherePositions.left.map(
-    (coordinate, index) =>
-      coordinate * leftShare
-      + anchor.hemispherePositions.right[index] * rightShare,
-  );
-}
-
-export function createMemoryNodeState(memories) {
+export function createMemoryNodeState(memories, regionPositions) {
   const state = new Map();
 
   for (const memory of memories) {
@@ -128,22 +197,13 @@ export function createMemoryNodeState(memories) {
         ...(normalizedActivations[0].hemispheres
           ? { hemispheres: normalizedActivations[0].hemispheres }
           : {}),
-        position: calculateMemoryPosition(memory.id, activations),
+        position: calculateMemoryPosition(memory.id, activations, regionPositions),
       },
       activations: normalizedActivations,
     });
   }
 
   return state;
-}
-
-const BRAIN_RADIUS = 1.95;
-
-function clampToBrainBoundary(position) {
-  const length = Math.hypot(...position);
-  if (length <= BRAIN_RADIUS) return position;
-  const scale = BRAIN_RADIUS / length;
-  return position.map((v) => v * scale);
 }
 
 function hashUnit(value) {

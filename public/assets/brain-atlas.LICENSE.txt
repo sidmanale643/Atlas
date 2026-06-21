@@ -1,0 +1,16 @@
+Brain atlas asset attribution
+
+Source: Human Reference Atlas (HRA) v1.3, 3D Male Allen Brain
+Provider: HuBMAP Consortium / humanatlas.io
+Source URL: https://cdn.humanatlas.io/hra-releases/v2.0/models/3d-vh-m-allen-brain.glb
+Source SHA-256: 2b9ad5b53e40e9f0936da74f7be38d2eed15604e26358c3870a0ea13499b9a35
+Digital object page: https://cdn.humanatlas.io/hra-releases/v2.0/docs/ref-organs/3d-m-brain.html
+
+The source model is licensed under the Creative Commons Attribution 4.0
+International license (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+Neurogram modifies the source by selecting anatomical structures, grouping them
+into application-specific semantic regions, simplifying geometry, joining meshes,
+reordering vertices, and quantizing attributes. The resulting semantic groupings
+are product mappings and are not anatomical claims by the HRA or HuBMAP.

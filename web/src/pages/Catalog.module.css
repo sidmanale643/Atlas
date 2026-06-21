@@ -455,79 +455,141 @@
   overflow-wrap: anywhere;
 }
 
-/* ---- card-based detail layout (matches reference) ------------------------- */
+/* ---- memory detail ------------------------------------------------------- */
 
-.detailCards {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.memoryDetail {
+  display: grid;
+  gap: 12px;
 }
 
-.detailCard {
+.detailTopline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.closeDetail {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.closeDetail:hover,
+.closeDetail:focus-visible {
+  color: var(--green-bright);
+  outline: none;
+}
+
+.corePanel,
+.detailPanel {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--bg-2);
+  background: rgba(17, 19, 24, 0.28);
   overflow: hidden;
 }
 
-.detailCardTitle {
+.corePanel {
+  padding: 16px 20px 14px;
+  border-color: var(--line-strong);
+  background:
+    linear-gradient(120deg, rgba(56, 130, 246, 0.06), transparent 42%),
+    rgba(17, 19, 24, 0.34);
+}
+
+.coreHeading,
+.coreFooter,
+.regionMeta {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 0;
-  padding: 14px 20px;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.coreLabel,
+.sourceBadge {
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0.18em;
+  font-size: 10px;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--green);
-  border-bottom: 1px solid var(--line);
 }
 
-.detailIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--inset);
-  font-size: 11px;
-  line-height: 1;
-  color: var(--green);
-  flex-shrink: 0;
-  font-family: var(--font-mono);
+.sourceBadge {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
 }
 
-.detailCardBody {
-  padding: 16px 20px;
+.rawMemory {
+  max-width: 960px;
+  margin: 12px 0 14px;
+  font-family: var(--font-serif);
+  font-size: clamp(24px, 2.2vw, 34px);
+  line-height: 1.15;
+  color: var(--text);
+  white-space: pre-wrap;
 }
 
-.detailField {
-  display: flex;
-  gap: 14px;
-  padding: 12px 0;
+.summaryBlock {
+  padding: 10px 0;
+  border-top: 1px solid var(--line-soft);
   border-bottom: 1px solid var(--line-soft);
 }
-.detailField:last-child {
-  border-bottom: none;
+.summaryBlock p {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.45;
+  color: var(--green-bright);
 }
 
-.detailFieldIcon {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius);
-  background: var(--inset);
-  border: 1px solid var(--line);
-  font-size: 14px;
-  color: var(--green);
+.coreFooter {
+  margin-top: 12px;
   font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.memoryDetailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.detailColumn {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.panelTitle {
+  margin: 0;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+
+.panelBody {
+  padding: 14px 16px;
 }
 
 .detailFieldLabel {
@@ -538,32 +600,6 @@
   text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 4px;
-}
-
-.detailFieldValue {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: 16px;
-  line-height: 1.45;
-  color: var(--text);
-}
-
-.detailSummaryHighlight {
-  color: var(--green-bright);
-}
-
-.detailFieldMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding-top: 10px;
-  margin-top: 4px;
-  border-top: 1px solid var(--line-soft);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--faint);
 }
 
 .detailChips {
@@ -589,26 +625,142 @@
   color: var(--muted);
 }
 
-.detailRelList {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.detailRelList li {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line-soft);
-  font-family: var(--font-serif);
-  font-size: 15px;
-  line-height: 1.45;
-  color: var(--text);
-}
-.detailRelList li:last-child {
-  border-bottom: none;
+.semanticList {
+  display: grid;
+  gap: 10px;
 }
 
-.detailPredicate {
+.semanticRow {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) auto minmax(90px, 1fr) auto minmax(90px, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.semanticNode {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--inset);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.semanticPredicate {
+  border-color: var(--line-strong);
+  color: var(--green-bright);
+}
+
+.semanticArrow {
   color: var(--green);
-  font-style: italic;
+}
+
+.profileList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+.profileList div {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.profileList dt {
+  color: var(--muted);
+}
+.profileList dd {
+  margin: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.regionList {
+  display: grid;
+  gap: 12px;
+}
+.regionRow {
+  min-width: 0;
+}
+.regionMeta {
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.regionMeta span:last-child {
+  color: var(--green-bright);
+}
+.regionTrack {
+  height: 4px;
+  background: rgba(56, 130, 246, 0.08);
+  overflow: hidden;
+}
+.regionTrack span {
+  display: block;
+  height: 100%;
+  background: var(--green);
+  box-shadow: var(--glow-soft);
+}
+
+.emptyRelated {
+  display: grid;
+  justify-items: center;
+  padding: 2px 8px 4px;
+  text-align: center;
+  color: var(--muted);
+}
+.emptyRelated > span {
+  font-size: 16px;
+  color: var(--green-dim);
+}
+.emptyRelated p {
+  margin: 3px 0 2px;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--text);
+}
+.emptyRelated small {
+  max-width: 260px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
+.rawExtraction {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.rawExtraction summary {
+  padding: 12px 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+.rawExtraction pre {
+  max-height: 320px;
+  margin: 0 0 16px;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--inset-strong);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--muted);
 }
 
 /* ---- related memories ---------------------------------------------------- */
@@ -661,17 +813,6 @@
   color: var(--muted);
 }
 
-.relatedMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-
 /* ---- inline states ------------------------------------------------------ */
 
 .state {
@@ -708,6 +849,12 @@
 
 /* ---- responsive --------------------------------------------------------- */
 
+@media (max-width: 1000px) {
+  .memoryDetailGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .toolbar {
     flex-direction: column;
@@ -730,7 +877,21 @@
     grid-column: auto;
   }
   .detail {
-    padding: 20px;
+    padding: 18px;
+  }
+  .corePanel {
+    padding: 14px;
+  }
+  .coreFooter {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .semanticRow {
+    grid-template-columns: 1fr;
+  }
+  .semanticArrow {
+    justify-self: center;
+    transform: rotate(90deg);
   }
   .relatedHeader {
     flex-direction: column;

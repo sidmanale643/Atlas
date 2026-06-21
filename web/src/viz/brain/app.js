@@ -1,6 +1,8 @@
 import * as THREE from "three";
-import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { createAnatomicalBrainRenderer } from "./anatomical-brain-renderer.js";
+import { BRAIN_ATLAS_URL } from "./anatomy-manifest.js";
+import { renderLegacyBrain } from "../brain-legacy/render.js";
 import {
   ENTITY_KIND_COLORS,
   buildEntitySpokes,
@@ -16,20 +18,22 @@ import {
 } from "./entity-lens.js";
 import { createMemoryNodeState } from "./memory-placement.js";
 import { filterMemoriesForSearch } from "./memory-search.js";
-import { REGION_SHADER_ORDER, getRegionShaderData } from "./brain-regions.js";
-import { REGION_ANCHORS, REGION_COLORS } from "./region-anchors.js";
+import { REGION_ANCHORS } from "./region-anchors.js";
+import { LEGACY_REGION_COLORS } from "../brain-legacy/region-colors.js";
 import {
   getHippocampalLaterality,
   getRegionContributions,
 } from "./region-mapper.js";
 
 const MAX_LENGTH = 180;
+const USE_LEGACY_BRAIN =
+  new URLSearchParams(window.location.search).get("brain") !== "legacy";
 const SHOW_REGION_ANCHORS =
   new URLSearchParams(window.location.search).get("debugRegions") === "1";
 const MIN_MEMORY_NODE_RADIUS = 0.09;
 const MAX_MEMORY_NODE_RADIUS = 0.16;
-const MIN_CONNECTION_RADIUS = 0.006;
-const MAX_CONNECTION_RADIUS = 0.032;
+const MIN_CONNECTION_RADIUS = 0.004;
+const MAX_CONNECTION_RADIUS = 0.02;
 const CONNECTION_SEGMENTS = 36;
 const FLOW_PARTICLE_COUNT = 3;
 const DEFAULT_MEMORY_COLOR = "#f4d8b4";
@@ -57,61 +61,17 @@ const DEEP_BRAIN_REGIONS = new Set([
   "basalGanglia",
   "entorhinal",
 ]);
-const REGION_SHADER_COUNT = 12;
-const REGION_SHADER_INDEX = Object.freeze(
-  Object.fromEntries(REGION_SHADER_ORDER.map((name, i) => [name, i])),
-);
-let brainHighlightMaterial = null;
-let interiorGlowGroup = null;
-const interiorGlows = [];
-let interiorGlowTexture = null;
-const REGION_MARKER_SHAPES = Object.freeze({
-  prefrontal: {
-    scale: [0.72, 0.38, 0.28],
-    rotation: [-0.12, 0, 0],
-  },
-  associationCortex: {
-    scale: [0.44, 0.62, 0.34],
-    rotation: [0.28, -0.38, -0.32],
-  },
-  temporalCortex: {
-    scale: [0.52, 0.3, 0.48],
-    rotation: [0.08, 0.32, -0.16],
-  },
-  parietalCortex: {
-    scale: [0.46, 0.44, 0.58],
-    rotation: [-0.25, 0.18, 0.24],
-  },
-  motorCortex: {
-    scale: [0.3, 0.64, 0.32],
-    rotation: [0.42, 0.06, -0.42],
-  },
-  cerebellum: {
-    scale: [0.54, 0.3, 0.38],
-    rotation: [-0.14, 0.2, 0.04],
-  },
-  basalGanglia: {
-    scale: [0.3, 0.22, 0.28],
-    rotation: [0.1, 0.35, 0],
-  },
-  amygdala: {
-    scale: [0.24, 0.18, 0.3],
-    rotation: [0.2, 0.22, -0.08],
-  },
-  insula: {
-    scale: [0.38, 0.5, 0.24],
-    rotation: [0.12, 0.54, -0.18],
-  },
-  entorhinal: {
-    scale: [0.34, 0.2, 0.26],
-    rotation: [0.18, 0.18, 0.12],
-  },
-});
 const SEARCH_DEBOUNCE_MS = 300;
 const SEMANTIC_SCORE_THRESHOLD = 0.25;
 const RELATED_MEMORY_LIMIT = 5;
 const RELATED_MEMORY_SCORE_THRESHOLD = 0.65;
 const RELATED_LINK_COLOR = "#9ae6f5";
+
+function getRegionColor(region) {
+  return USE_LEGACY_BRAIN
+    ? LEGACY_REGION_COLORS[region]
+    : REGION_ANCHORS[region]?.color;
+}
 
 const form = document.querySelector("#memoryForm");
 const input = document.querySelector("#memoryInput");
@@ -133,15 +93,31 @@ const searchInput = document.querySelector("#memorySearch");
 const searchStatus = document.querySelector("#memorySearchStatus");
 const resetFiltersButton = document.querySelector("#resetFiltersButton");
 
+if (USE_LEGACY_BRAIN) {
+  brainStage.style.setProperty(
+    "--legacy-prefrontal-color",
+    LEGACY_REGION_COLORS.prefrontal,
+  );
+  brainStage.style.setProperty(
+    "--legacy-association-color",
+    LEGACY_REGION_COLORS.associationCortex,
+  );
+}
+
 let memories = [];
 let selectedMemoryId = null;
 let hoveredMemoryId = null;
 let selectedRegion = null;
 let hoveredRegion = null;
+let selectedRegionMemoryId = null;
 let extracting = false;
 let regionMarkers = new Map();
-let regionMarkerHitTargets = [];
+let regionScenePositions = new Map();
+// Set whenever regionScenePositions changes; consumed by updateRegionMarkers()
+// to re-anchor markers to the measured centers before they're shown.
+let regionMarkerPositionsDirty = false;
 let regionLabelButtons = new Map();
+let anatomicalBrainRenderer = null;
 let memoryNodeState = new Map();
 let memoryNodeGroup = null;
 let memoryNodes = [];
@@ -703,7 +679,11 @@ function render() {
     setHoveredMemory(null);
   }
 
-  memoryNodeState = createMemoryNodeState(filtered);
+  // The memory list, detail panel, and counts don't depend on measured region
+  // positions, so they can update immediately on every render. Everything that
+  // places nodes/connections/labels must wait for the GLTF atlas to report real
+  // region centers — otherwise placement falls back to hardcoded anchors tuned
+  // for the legacy OBJ brain and renders in the wrong location.
   syncRelatedMemoryRequest();
   syncSelectedRegion();
   updateFilterControls();
@@ -711,11 +691,15 @@ function render() {
   emptyState.hidden = filtered.length > 0;
   renderMemoryList();
   renderDetail();
+  updateClearSelectionButton();
+
+  if (!regionScenePositions.size) return;
+
+  memoryNodeState = createMemoryNodeState(filtered, regionScenePositions);
   renderMemoryNodes();
   updateRegionMarkers();
   updateActivationConnections();
   updateRegionLabels();
-  updateClearSelectionButton();
 }
 
 function selectMemory(
@@ -733,6 +717,7 @@ function selectMemory(
   selectedMemoryId = id;
   hoveredRegion = null;
   selectedRegion = memoryNodeState.get(id)?.core.region || null;
+  selectedRegionMemoryId = id;
   if (brainControls) brainControls.autoRotate = false;
   if (recordHistory) {
     navigationHistory = pushNavigation(navigationHistory, {
@@ -751,12 +736,16 @@ function selectMemory(
   updateActivationConnections();
   updateRegionLabels();
   updateClearSelectionButton();
-  if (focusCamera) focusSelectedMemory();
+  if (focusCamera) focusAnatomicalRegion(selectedRegion);
   const atlasPanel = document.querySelector(".atlas-panel");
-  const atlasRect = atlasPanel.getBoundingClientRect();
-  const inView = atlasRect.top < window.innerHeight && atlasRect.bottom > 0;
+  const scrollTarget = window.innerWidth <= 760 ? brainStage : atlasPanel;
+  const atlasRect = scrollTarget.getBoundingClientRect();
+  const inView = atlasRect.top >= 72 && atlasRect.bottom <= window.innerHeight;
   if (!inView) {
-    atlasPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+    scrollTarget.scrollIntoView({
+      behavior: reduceMotion.matches ? "auto" : "smooth",
+      block: window.innerWidth <= 760 ? "start" : "center",
+    });
   }
 }
 
@@ -765,6 +754,7 @@ function clearSelection() {
   resetRelatedMemoryState();
   selectedMemoryId = null;
   selectedRegion = null;
+  selectedRegionMemoryId = null;
   hoveredRegion = null;
   cameraFocus = null;
   renderDetail();
@@ -781,18 +771,18 @@ function clearSelection() {
 function syncSelectedRegion() {
   if (!selectedMemoryId) {
     selectedRegion = null;
+    selectedRegionMemoryId = null;
     return;
   }
 
-  const state = memoryNodeState.get(selectedMemoryId);
-  if (!state) {
-    selectedRegion = null;
-    return;
-  }
+  // Region focus belongs to a memory selection, not to a render pass. Preserve
+  // the user's pinned region while filters or background data updates rebuild
+  // the scene; only choose a new default when the selected memory itself changes.
+  if (selectedRegionMemoryId === selectedMemoryId) return;
 
-  if (!state.activations.some(({ region }) => region === selectedRegion)) {
-    selectedRegion = state.core.region;
-  }
+  selectedRegionMemoryId = selectedMemoryId;
+  const memory = memories.find(({ id }) => id === selectedMemoryId);
+  selectedRegion = getSortedRegions(memory)[0]?.region || null;
 }
 
 function getActiveMemoryId() {
@@ -802,7 +792,8 @@ function getActiveMemoryId() {
 
 function getFocusedRegion() {
   if (entityLens) return null;
-  return hoveredRegion ?? null;
+  if (hoveredRegion) return hoveredRegion;
+  return getActiveMemoryId() === selectedMemoryId ? selectedRegion : null;
 }
 
 function setHoveredRegion(region) {
@@ -820,10 +811,12 @@ function selectRegion(region) {
   }
 
   selectedRegion = region;
+  selectedRegionMemoryId = selectedMemoryId;
   hoveredRegion = null;
   updateRegionMarkers();
   updateActivationConnections();
   updateRegionInspectorSelection({ revealSelected: true });
+  focusAnatomicalRegion(region);
 }
 
 function updateClearSelectionButton() {
@@ -1533,7 +1526,7 @@ function createRegionRoleTable(memory) {
     areaCell.scope = "row";
     const areaButton = document.createElement("button");
     areaButton.type = "button";
-    areaButton.style.setProperty("--region-color", anchor.color);
+    areaButton.style.setProperty("--region-color", getRegionColor(region));
     areaButton.textContent = anchor.label;
     areaButton.addEventListener("click", () => selectRegion(region));
     areaCell.append(areaButton);
@@ -1605,7 +1598,7 @@ function renderRegionExplanation(memory) {
     const name = document.createElement("span");
     name.className = "activation-name";
     const swatch = document.createElement("i");
-    swatch.style.backgroundColor = anchor.color;
+    swatch.style.backgroundColor = getRegionColor(region);
     const label = document.createElement("span");
     label.textContent = anchor.label;
     name.append(swatch, label);
@@ -1618,7 +1611,7 @@ function renderRegionExplanation(memory) {
     meter.className = "activation-meter";
     const fill = document.createElement("span");
     fill.style.width = formatPercent(weight);
-    fill.style.backgroundColor = anchor.color;
+    fill.style.backgroundColor = getRegionColor(region);
     meter.append(fill);
 
     const reasons = document.createElement("ul");
@@ -1749,8 +1742,26 @@ function getSortedRegions(memory) {
 function updateRegionInspectorSelection({ revealSelected = false } = {}) {
   const focusedRegion = getFocusedRegion();
 
+  // The activation rows and role table in the detail panel are rendered for the
+  // SELECTED memory (see renderDetail). Only apply is-focused when the focused
+  // region is actually one of that memory's activations — otherwise hovering a
+  // different memory's region on the brain would highlight a row whose region
+  // belongs to a foreign memory, producing the "highlighting is elsewhere"
+  // mismatch between the inspector and the 3D view.
+  const selectedMemory = memories.find((item) => item.id === selectedMemoryId);
+  const inspectorRegions = new Set(
+    selectedMemory?.regions
+      ?.filter(({ weight }) => Number(weight) > 0)
+      .map(({ region }) => region) || [],
+  );
+  const inspectorFocused = getActiveMemoryId() === selectedMemoryId
+    && focusedRegion
+    && inspectorRegions.has(focusedRegion)
+    ? focusedRegion
+    : null;
+
   detail.querySelectorAll(".activation-item").forEach((item) => {
-    const focused = item.dataset.region === focusedRegion;
+    const focused = item.dataset.region === inspectorFocused;
     const selected = item.dataset.region === selectedRegion;
     item.classList.toggle("is-focused", focused);
     item.querySelector(".activation-heading")?.setAttribute(
@@ -1764,12 +1775,15 @@ function updateRegionInspectorSelection({ revealSelected = false } = {}) {
   });
 
   detail.querySelectorAll(".region-role-table tr[data-region]").forEach((row) => {
-    const focused = row.dataset.region === focusedRegion;
+    const focused = row.dataset.region === inspectorFocused;
     const selected = row.dataset.region === selectedRegion;
     row.classList.toggle("is-focused", focused);
     row.classList.toggle("is-selected", selected);
   });
 
+  // The on-stage region label buttons belong to the active (hovered-or-
+  // selected) memory and mirror the 3D brain, so they always follow the live
+  // focus without the per-memory guard above.
   regionLabelButtons.forEach((button, region) => {
     const focused = region === focusedRegion;
     button.classList.toggle("is-focused", focused);
@@ -1949,7 +1963,6 @@ function createRegionAnchorGroup() {
   const anchors = new THREE.Group();
   anchors.name = "region-anchors";
   regionMarkers = new Map();
-  regionMarkerHitTargets = [];
 
   Object.entries(REGION_ANCHORS).forEach(([region, definition]) => {
     const anchor = new THREE.Object3D();
@@ -1960,10 +1973,8 @@ function createRegionAnchorGroup() {
     anchor.userData.color = definition.color;
     anchor.userData.markerScale = definition.markerScale;
 
-    const marker = createRegionMarker(region, definition);
-    anchor.add(marker);
-    regionMarkers.set(region, marker);
-    regionMarkerHitTargets.push(...marker.userData.hitTargets);
+    anchor.visible = false;
+    regionMarkers.set(region, anchor);
 
     if (SHOW_REGION_ANCHORS) {
       const debugMarker = new THREE.Mesh(
@@ -1989,543 +2000,75 @@ function createRegionAnchorGroup() {
   return anchors;
 }
 
-function createRegionMarker(region, definition) {
-  if (region === "hippocampus") {
-    return createHippocampusMarker(definition);
-  }
-
-  const shape = REGION_MARKER_SHAPES[region];
-  if (shape) {
-    return createAnatomicalRegionMarker(region, definition, shape);
-  }
-
-  const isDeepRegion = DEEP_BRAIN_REGIONS.has(region);
-  const marker = new THREE.Group();
-  const hitTarget = new THREE.Mesh(
-    new THREE.SphereGeometry(0.2, 12, 8),
-    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
-  );
-  hitTarget.userData.region = region;
-  hitTarget.userData.isRegionMarker = true;
-
-  marker.name = `region-marker:${region}`;
-  marker.visible = false;
-  marker.scale.setScalar(definition.markerScale);
-  marker.userData = {
-    region,
-    isDeepRegion,
-    markerScale: definition.markerScale,
-    weight: 0,
-    hitTargets: [hitTarget],
-  };
-  marker.add(hitTarget);
-  return marker;
-}
-
-function createAnatomicalRegionMarker(region, definition, shape) {
-  const hitMaterial = new THREE.MeshBasicMaterial({
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-  });
-  const marker = new THREE.Group();
-  const hitTarget = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 12, 8),
-    hitMaterial,
-  );
-
-  hitTarget.scale.set(...shape.scale);
-  hitTarget.rotation.set(...shape.rotation);
-  hitTarget.scale.multiplyScalar(1.12);
-
-  hitTarget.userData.region = region;
-  hitTarget.userData.isRegionMarker = true;
-
-  marker.name = `region-marker:${region}`;
-  marker.visible = false;
-  marker.scale.setScalar(definition.markerScale);
-  marker.userData = {
-    region,
-    isDeepRegion: DEEP_BRAIN_REGIONS.has(region),
-    isAnatomicalShape: true,
-    markerScale: definition.markerScale,
-    weight: 0,
-    hitTargets: [hitTarget],
-  };
-  marker.add(hitTarget);
-  return marker;
-}
-
-function createHippocampusMarker(definition) {
-  const hitMaterial = new THREE.MeshBasicMaterial({
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-  });
-  const marker = new THREE.Group();
-  const hitTargets = [];
-
-  [
-    ["left", -1],
-    ["right", 1],
-  ].forEach(([hemisphere, side]) => {
-    const curve = createHippocampusCurve(side, definition.position);
-    const hitTarget = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, 16, 0.25, 6, false),
-      hitMaterial,
-    );
-
-    hitTarget.userData.region = "hippocampus";
-    hitTarget.userData.hemisphere = hemisphere;
-    hitTarget.userData.isRegionMarker = true;
-    marker.add(hitTarget);
-    hitTargets.push(hitTarget);
-  });
-
-  marker.name = "region-marker:hippocampus";
-  marker.visible = false;
-  marker.scale.setScalar(1);
-  marker.userData = {
-    region: "hippocampus",
-    isDeepRegion: true,
-    isAnatomicalShape: true,
-    markerScale: 1,
-    weight: 0,
-    hitTargets,
-  };
-  return marker;
-}
-
-function createHippocampusCurve(side, anchorPosition) {
-  const points = [
-    [1.02, -0.98, -0.78],
-    [1.12, -1.02, -0.43],
-    [1.13, -0.98, -0.08],
-    [1.06, -0.9, 0.28],
-    [0.94, -0.78, 0.58],
-    [0.8, -0.61, 0.8],
-    [0.77, -0.43, 0.72],
-    [0.86, -0.36, 0.57],
-  ].map(
-    ([x, y, z]) =>
-      new THREE.Vector3(
-        side * x - anchorPosition[0],
-        y - anchorPosition[1],
-        z - anchorPosition[2],
-      ),
-  );
-
-  return new THREE.CatmullRomCurve3(points, false, "centripetal");
-}
-
 function updateRegionMarkers() {
-  regionMarkers.forEach((marker) => setRegionMarkerWeight(marker, 0));
-  const showDefaultHippocampus =
-    !entityLens && selectedMemoryId == null && hoveredMemoryId == null;
+  // Always re-anchor markers to the latest measured positions before showing
+  // them. The GLTF load callback populates regionScenePositions once; this
+  // guarantees markers can never drift from the real anatomy even if the
+  // model reloads or the brainContent transform changes after boot.
+  syncRegionMarkerPositions();
 
-  if (showDefaultHippocampus) {
-    const hippocampusMarker = regionMarkers.get("hippocampus");
-    if (hippocampusMarker) setRegionMarkerWeight(hippocampusMarker, 0.28);
+  regionMarkers.forEach((marker) => { marker.visible = false; });
+
+  if (anatomicalBrainRenderer && !regionScenePositions.size) {
+    anatomicalBrainRenderer.clearActivations();
+    anatomicalBrainRenderer.setSelectedRegion(null).setHoveredRegion(null);
     return;
   }
 
   if (entityLens) {
+    anatomicalBrainRenderer?.clearActivations();
+    anatomicalBrainRenderer?.setSelectedRegion(null).setHoveredRegion(null);
     return;
   }
 
   const activeMemoryId = getActiveMemoryId();
   const memory = memories.find((item) => item.id === activeMemoryId);
   if (!memory) {
+    anatomicalBrainRenderer?.clearActivations();
+    anatomicalBrainRenderer?.setSelectedRegion(null).setHoveredRegion(null);
     return;
   }
 
-  memory.regions.forEach(({ region, weight, hemispheres }) => {
+  memory.regions.forEach(({ region, weight }) => {
     const marker = regionMarkers.get(region);
-    if (marker) {
-      setRegionMarkerWeight(
-        marker,
-        weight,
-        region === getFocusedRegion(),
-        hemispheres,
-      );
-    }
+    if (marker) marker.visible = Number(weight) > 0;
   });
-}
 
-function setRegionMarkerWeight(
-  marker,
-  value,
-  focused = false,
-  hemispheres = null,
-) {
-  const weight = THREE.MathUtils.clamp(Number(value) || 0, 0, 1);
-  const hasFocusedRegion = Boolean(getFocusedRegion());
-  const emphasis = hasFocusedRegion ? (focused ? 1.2 : 0.74) : 1;
-
-  marker.userData.weight = weight;
-  marker.userData.focused = focused;
-  marker.userData.emphasis = emphasis;
-  marker.visible = weight > 0;
-  marker.scale.setScalar(getRegionMarkerScale(marker));
-
-  if (hemispheres) {
-    marker.userData.hemispheres = hemispheres;
-  }
-
-  const region = marker.userData.region;
-  if (region === "hippocampus") {
-    const leftWeight = hemispheres ? hemispheres.left ?? weight / 2 : weight / 2;
-    const rightWeight = hemispheres ? hemispheres.right ?? weight / 2 : weight / 2;
-    const leftIdx = REGION_SHADER_INDEX["hippocampusLeft"];
-    const rightIdx = REGION_SHADER_INDEX["hippocampusRight"];
-    if (leftIdx != null) {
-      setBrainRegionShaderWeight(leftIdx, leftWeight, emphasis);
-    }
-    if (rightIdx != null) {
-      setBrainRegionShaderWeight(rightIdx, rightWeight, emphasis);
-    }
-  } else {
-    const regionIndex = REGION_SHADER_INDEX[region];
-    if (regionIndex != null) {
-      setBrainRegionShaderWeight(regionIndex, weight, emphasis);
-    }
-  }
-}
-
-function getRegionMarkerScale(marker, pulse = 1) {
-  const { isDeepRegion, markerScale, weight } = marker.userData;
-  const strength = Math.sqrt(THREE.MathUtils.clamp(weight, 0, 1));
-  return (
-    markerScale *
-    (isDeepRegion ? 1.08 : 1) *
-    (0.94 + strength * 0.5) *
-    pulse
+  anatomicalBrainRenderer?.setMemoryActivations(memory.regions);
+  anatomicalBrainRenderer?.setSelectedRegion(
+    activeMemoryId === selectedMemoryId ? selectedRegion : null,
   );
+  anatomicalBrainRenderer?.setHoveredRegion(hoveredRegion);
 }
 
-function createBrainHighlightMaterial() {
-  const material = new THREE.MeshStandardMaterial({
-    color: '#f4eee2',
-    emissive: '#9bb9bc',
-    emissiveIntensity: 0.035,
-    roughness: 0.22,
-    metalness: 0,
-    transparent: true,
-    opacity: 0.35,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
-
-  return material;
-}
-
-const REGION_SHADER_GLSL = `
-  precision highp float;
-
-  uniform int uRegionCount;
-  uniform vec3 uRegionCenters[${REGION_SHADER_COUNT}];
-  uniform vec3 uRegionRadii[${REGION_SHADER_COUNT}];
-  uniform vec3 uRegionColors[${REGION_SHADER_COUNT}];
-  uniform float uRegionBilateral[${REGION_SHADER_COUNT}];
-  uniform float uRegionWeights[${REGION_SHADER_COUNT}];
-  uniform float uRegionEmphasis[${REGION_SHADER_COUNT}];
-  uniform float uRegionPhase[${REGION_SHADER_COUNT}];
-  uniform float uHighlightStrength;
-  uniform float uTime;
-  uniform vec3 uModelCenter;
-  uniform vec3 uBaseColor;
-  uniform vec3 uEmissiveColor;
-
-  varying vec3 vObjPosition;
-  varying vec3 vViewNormal;
-  varying vec3 vViewPosition;
-
-  // Accumulated colour plus a separate "peak" channel so we can size the alpha
-  // off the strongest single contribution rather than the summed total.
-  vec4 computeRegionHighlight(vec3 rawPos) {
-    vec3 totalColor = vec3(0.0);
-    float peak = 0.0;
-    vec3 objPos = rawPos - uModelCenter;
-
-    for (int i = 0; i < ${REGION_SHADER_COUNT}; i++) {
-      if (i >= uRegionCount) break;
-      float w = uRegionWeights[i];
-      if (w <= 0.001) continue;
-
-      vec3 center = uRegionCenters[i];
-      vec3 radius = uRegionRadii[i];
-
-      float px = objPos.x;
-      if (uRegionBilateral[i] > 0.5) {
-        px = abs(px);
-        center = vec3(abs(center.x), center.y, center.z);
-      }
-
-      vec3 d = (vec3(px, objPos.y, objPos.z) - center) / radius;
-      float dist = length(d);
-
-      // Bright tight core + a wide feathered halo. Widening the halo's outer
-      // bound past 1.0 keeps thin cortical patches from dropping out entirely.
-      float core = 1.0 - smoothstep(0.0, 0.55, dist);
-      float halo = 1.0 - smoothstep(0.45, 1.2, dist);
-      float field = core + halo * 0.5;
-      if (field <= 0.0) continue;
-
-      // Lift low activations so faint regions still register, then apply
-      // focus emphasis and a slow per-region breathing pulse.
-      float wv = pow(clamp(w, 0.0, 1.0), 0.55);
-      float pulse = 1.0 + 0.12 * sin(uTime * 1.6 + uRegionPhase[i]);
-      float intensity = field * wv * uRegionEmphasis[i] * pulse;
-
-      totalColor += uRegionColors[i] * intensity;
-      peak = max(peak, intensity);
-    }
-
-    return vec4(totalColor, peak);
-  }
-
-  void main() {
-    vec4 hi = computeRegionHighlight(vObjPosition);
-    vec3 highlight = hi.rgb;
-    float peak = hi.w;
-    float intensity = uHighlightStrength;
-
-    // Fresnel rim so the glow wraps the silhouette instead of reading as a flat decal.
-    vec3 viewDir = normalize(-vViewPosition);
-    float fresnel = pow(1.0 - clamp(dot(normalize(vViewNormal), viewDir), 0.0, 1.0), 2.0);
-    vec3 rimColor = highlight * fresnel * 0.6;
-
-    vec3 col = (highlight + rimColor) * intensity;
-    // Soft tonemap instead of a hard normalize keeps overlapping regions saturated.
-    col = col / (col + vec3(0.55));
-
-    float lum = max(col.r, max(col.g, col.b));
-    float alpha = clamp(lum * 1.4 + peak * intensity * 0.5 + fresnel * peak * 0.25, 0.0, 1.0);
-    gl_FragColor = vec4(col, alpha);
-  }
-`;
-
-const REGION_SHADER_VERTEX_GLSL = `
-  precision highp float;
-  varying vec3 vObjPosition;
-  varying vec3 vViewNormal;
-  varying vec3 vViewPosition;
-  void main() {
-    vObjPosition = position;
-    vViewNormal = normalize(normalMatrix * normal);
-    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    vViewPosition = mvPosition.xyz;
-    gl_Position = projectionMatrix * mvPosition;
-  }
-`;
-
-function applyBrainMaterial(model) {
-  brainHighlightMaterial = createBrainHighlightMaterial();
-
-  const bounds = new THREE.Box3().setFromObject(model);
-  const modelCenter = bounds.getCenter(new THREE.Vector3());
-
-  const highlightUniforms = {
-    uRegionCount: { value: REGION_SHADER_COUNT },
-    uRegionCenters: { value: [] },
-    uRegionRadii: { value: [] },
-    uRegionColors: { value: [] },
-    uRegionBilateral: { value: [] },
-    uRegionWeights: { value: new Float32Array(REGION_SHADER_COUNT).fill(0) },
-    uRegionEmphasis: { value: new Float32Array(REGION_SHADER_COUNT).fill(1) },
-    uRegionPhase: { value: new Float32Array(REGION_SHADER_COUNT).fill(0) },
-    uHighlightStrength: { value: 0.0 },
-    uTime: { value: 0.0 },
-    uModelCenter: { value: modelCenter },
-    uBaseColor: { value: new THREE.Color('#f4eee2') },
-    uEmissiveColor: { value: new THREE.Color('#9bb9bc') },
-  };
-
-  const shaderRegions = getRegionShaderData().map((data, index) => {
-    let regionKey = data.name;
-    if (regionKey === "hippocampusLeft" || regionKey === "hippocampusRight") {
-      regionKey = "hippocampus";
-    }
-    // Out-of-sync breathing so regions don't pulse in lockstep.
-    highlightUniforms.uRegionPhase.value[index] = index * 0.73;
-    return {
-      name: data.name,
-      center: data.center,
-      radius: data.radius,
-      color: REGION_COLORS[regionKey],
-      bilateral: data.bilateral,
-      deep: data.deep,
-      phase: index * 0.73,
-      shaderIndex: index,
-    };
-  });
-
-  const centers = [];
-  const radii = [];
-  const colors = [];
-  const bilateral = [];
-  for (const r of shaderRegions) {
-    centers.push(new THREE.Vector3(...r.center));
-    radii.push(new THREE.Vector3(...r.radius));
-    colors.push(new THREE.Color(r.color));
-    bilateral.push(r.bilateral ? 1.0 : 0.0);
-  }
-  highlightUniforms.uRegionCenters.value = centers;
-  highlightUniforms.uRegionRadii.value = radii;
-  highlightUniforms.uRegionColors.value = colors;
-  highlightUniforms.uRegionBilateral.value = bilateral;
-
-  const highlightMaterial = new THREE.ShaderMaterial({
-    vertexShader: REGION_SHADER_VERTEX_GLSL,
-    fragmentShader: REGION_SHADER_GLSL,
-    uniforms: highlightUniforms,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-  });
-
-  model.traverse((child) => {
-    if (!child.isMesh) return;
-    child.material = brainHighlightMaterial;
-    const highlightClone = new THREE.Mesh(child.geometry, highlightMaterial);
-    highlightClone.renderOrder = 1;
-    child.parent.add(highlightClone);
-  });
-
-  brainHighlightMaterial.userData.shader = highlightMaterial;
-  brainHighlightMaterial.userData.regionWeights = highlightUniforms.uRegionWeights.value;
-  brainHighlightMaterial.userData.regionEmphasis = highlightUniforms.uRegionEmphasis.value;
-
-  buildInteriorGlows(shaderRegions);
-}
-
-// A soft radial-gradient sprite texture used for the deep-region inner glow.
-function getInteriorGlowTexture() {
-  if (interiorGlowTexture) return interiorGlowTexture;
-  const size = 128;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  const gradient = ctx.createRadialGradient(
-    size / 2, size / 2, 0,
-    size / 2, size / 2, size / 2,
-  );
-  gradient.addColorStop(0.0, "rgba(255,255,255,1)");
-  gradient.addColorStop(0.35, "rgba(255,255,255,0.55)");
-  gradient.addColorStop(0.7, "rgba(255,255,255,0.12)");
-  gradient.addColorStop(1.0, "rgba(255,255,255,0)");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-  interiorGlowTexture = new THREE.CanvasTexture(canvas);
-  interiorGlowTexture.colorSpace = THREE.SRGBColorSpace;
-  return interiorGlowTexture;
-}
-
-// Deep structures (hippocampus, amygdala, entorhinal, basal ganglia) sit inside
-// the volume where the cortical surface never reaches them, so the surface glow
-// alone leaves them dark. These additive sprites sit at each region's interior
-// centre and read as light glowing from within the translucent shell.
-function buildInteriorGlows(shaderRegions) {
-  interiorGlows.length = 0;
-  interiorGlowGroup = new THREE.Group();
-  interiorGlowGroup.name = "interior-glows";
-
-  const texture = getInteriorGlowTexture();
-
-  const addGlow = (region, position) => {
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      color: new THREE.Color(region.color),
-      transparent: true,
-      depthWrite: false,
-      depthTest: false,
-      blending: THREE.AdditiveBlending,
-      opacity: 0,
-    });
-    const sprite = new THREE.Sprite(material);
-    sprite.position.set(...position);
-    // Size to the region's spread; sprites are camera-facing so we use the
-    // largest radius component, scaled up so the soft falloff covers the lobe.
-    const baseScale = Math.max(...region.radius) * 2.4;
-    sprite.scale.setScalar(baseScale);
-    sprite.visible = false;
-    sprite.renderOrder = 0;
-    interiorGlowGroup.add(sprite);
-
-    interiorGlows.push({
-      sprite,
-      shaderIndex: region.shaderIndex,
-      baseScale,
-      phase: region.phase,
-    });
-  };
-
-  shaderRegions
-    .filter((region) => region.deep)
-    .forEach((region) => {
-      addGlow(region, region.center);
-      // Bilateral regions are stored once on +X but lit on both hemispheres by
-      // the surface shader, so mirror the inner glow to match.
-      if (region.bilateral) {
-        const [x, y, z] = region.center;
-        addGlow(region, [-x, y, z]);
-      }
-    });
-}
-
-// Drive each interior glow off the same shader weights/emphasis the surface uses,
-// with the matching breathing pulse. Called every frame from the animate loop.
-function updateInteriorGlows(time) {
-  if (!brainHighlightMaterial?.userData.regionWeights) return;
-  const weights = brainHighlightMaterial.userData.regionWeights;
-  const emphasis = brainHighlightMaterial.userData.regionEmphasis;
-
-  interiorGlows.forEach((glow) => {
-    const w = weights[glow.shaderIndex] || 0;
-    if (w <= 0.001) {
-      glow.sprite.visible = false;
-      return;
-    }
-    const e = emphasis[glow.shaderIndex] || 1;
-    const wv = Math.pow(THREE.MathUtils.clamp(w, 0, 1), 0.55);
-    const pulse = 1 + 0.12 * Math.sin(time * 1.6 + glow.phase);
-    const intensity = wv * e * pulse;
-
-    glow.sprite.visible = true;
-    glow.sprite.material.opacity = Math.min(intensity * 0.85, 1);
-    glow.sprite.scale.setScalar(glow.baseScale * (0.82 + wv * 0.45) * pulse);
-  });
-}
-
-function updateBrainShaderUniforms() {
-  if (!brainHighlightMaterial?.userData.shader) return;
-  // Freeze the breathing pulse when the user prefers reduced motion.
-  const time = reduceMotion.matches ? 0 : performance.now() * 0.001;
-  const highlightMat = brainHighlightMaterial.userData.shader;
-  if (highlightMat.isShaderMaterial) {
-    highlightMat.uniforms.uRegionCount.value = REGION_SHADER_COUNT;
-    highlightMat.uniforms.uHighlightStrength.value = 1.0;
-    highlightMat.uniforms.uTime.value = time;
-  }
-  updateInteriorGlows(time);
-}
-
-function setBrainRegionShaderWeight(regionIndex, weight, emphasis = 1) {
-  if (!brainHighlightMaterial) return;
-  brainHighlightMaterial.userData.regionWeights[regionIndex] = weight;
-  brainHighlightMaterial.userData.regionEmphasis[regionIndex] = emphasis;
-
-  if (brainHighlightMaterial.userData.shader?.uniforms) {
-    brainHighlightMaterial.userData.shader.uniforms.uRegionWeights.value = [...brainHighlightMaterial.userData.regionWeights];
-    brainHighlightMaterial.userData.shader.uniforms.uRegionEmphasis.value = [...brainHighlightMaterial.userData.regionEmphasis];
+// Re-position region markers from the measured atlas centers. Called on every
+// updateRegionMarkers() but only does work when positions are dirty, so it's
+// cheap on the steady-state hover/select path. This is the single source of
+// truth for marker position after load — previously markers were positioned
+// exactly once in the GLTF onLoad callback and could go stale.
+function syncRegionMarkerPositions() {
+  if (!regionMarkerPositionsDirty || !regionScenePositions.size) return;
+  regionMarkerPositionsDirty = false;
+  for (const [region, measured] of regionScenePositions) {
+    const marker = regionMarkers.get(region);
+    if (!marker || !measured?.center) continue;
+    marker.position.fromArray(measured.center);
   }
 }
 
 function updateActivationConnections() {
   if (!activationConnectionGroup) return;
+
+  if (anatomicalBrainRenderer && !regionScenePositions.size) {
+    memoryConnections.forEach((connection) => {
+      connection.userData.tubeMaterial.opacity = 0;
+      connection.userData.glowMaterial.opacity = 0;
+      connection.userData.flowParticles.forEach((particle) => {
+        particle.visible = false;
+      });
+    });
+    return;
+  }
 
   if (entityLens) {
     memoryConnections.forEach((connection) => {
@@ -2545,16 +2088,20 @@ function updateActivationConnections() {
     const { weight, tubeMaterial, glowMaterial, flowParticles } =
       connection.userData;
     const focused = connection.userData.region === focusedRegion;
-    const emphasis = focusedRegion ? (focused ? 1.28 : 0.52) : 1;
-    const opacity = active
-      ? THREE.MathUtils.lerp(0.42, 0.82, weight) * emphasis
-      : 0;
+    // A selected memory shows its complete activation fan-out. Focusing a
+    // region strengthens that path without erasing the surrounding network.
+    const visible = active;
+    const opacity = !visible
+      ? 0
+      : focused
+        ? THREE.MathUtils.lerp(0.72, 0.85, weight)
+        : THREE.MathUtils.lerp(0.6, 0.72, weight);
 
     tubeMaterial.opacity = Math.min(opacity, 1);
-    glowMaterial.opacity = Math.min(opacity * 0.26, 1);
+    glowMaterial.opacity = Math.min(opacity * (focused ? 0.38 : 0.24), 1);
     flowParticles.forEach((particle) => {
       particle.visible =
-        active && (!focusedRegion || focused) && !reduceMotion.matches;
+        visible && !reduceMotion.matches;
     });
   });
 }
@@ -2582,6 +2129,14 @@ function createRegionLabel(label, color) {
 }
 
 function updateRegionLabels() {
+  if (anatomicalBrainRenderer && !regionScenePositions.size) {
+    regionLabels.replaceChildren();
+    regionLabelButtons = new Map();
+    regionLabels.dataset.memoryId = "";
+    regionLabels.hidden = true;
+    return;
+  }
+
   if (entityLens) {
     regionLabels.replaceChildren();
     regionLabelButtons = new Map();
@@ -2590,11 +2145,12 @@ function updateRegionLabels() {
     return;
   }
 
-  const visibleMemoryId =
-    selectedMemoryId &&
-    (!hoveredMemoryId || hoveredMemoryId === selectedMemoryId)
-      ? selectedMemoryId
-      : null;
+  // Labels must track the same memory the 3D brain highlights. Previously this
+  // used a narrower check that excluded the hovered memory unless it matched
+  // the selected one, so hovering memory B lit up B's regions on the brain
+  // while the on-stage labels still belonged to (or were hidden for) memory A.
+  // Using getActiveMemoryId() keeps the brain and the label rail in sync.
+  const visibleMemoryId = getActiveMemoryId();
   const memory = memories.find((item) => item.id === visibleMemoryId);
 
   if (!memory) {
@@ -2628,7 +2184,7 @@ function updateRegionLabels() {
     button.dataset.region = region;
     button.dataset.role = anchor.role;
     if (DEEP_BRAIN_REGIONS.has(region)) button.dataset.deep = "true";
-    button.style.setProperty("--region-color", anchor.color);
+    button.style.setProperty("--region-color", getRegionColor(region));
     button.style.setProperty(
       "--region-weight",
       THREE.MathUtils.clamp(Number(weight) || 0, 0, 1).toFixed(3),
@@ -2656,6 +2212,7 @@ function updateRegionLabels() {
 }
 
 function updateRegionLabelPositions(camera) {
+  if (anatomicalBrainRenderer && !regionScenePositions.size) return;
   if (regionLabels.hidden || !regionLabelButtons.size) return;
 
   const { width, height } = brainStage.getBoundingClientRect();
@@ -2721,6 +2278,7 @@ function updateRegionLabelPositions(camera) {
 
 function renderMemoryNodes() {
   if (!memoryNodeGroup) return;
+  if (anatomicalBrainRenderer && !regionScenePositions.size) return;
 
   disposeGroupContents(memoryNodeGroup);
   disposeGroupContents(activationConnectionGroup);
@@ -2748,11 +2306,15 @@ function renderMemoryNodes() {
     const material = new THREE.MeshStandardMaterial({
       color: DEFAULT_MEMORY_COLOR,
       emissive: DEFAULT_MEMORY_COLOR,
-      emissiveIntensity: 0.3,
+      emissiveIntensity: 0.55,
       roughness: 0.16,
       metalness: 0,
       transparent: true,
-      opacity: 0.96,
+      opacity: 0.95,
+      // depthTest:false lets each memory glow through the solid brain shell so
+      // memories inside the volume stay visible instead of being occluded.
+      depthTest: false,
+      depthWrite: false,
     });
     const node = new THREE.Mesh(
       new THREE.SphereGeometry(radius, 20, 14),
@@ -2761,6 +2323,9 @@ function renderMemoryNodes() {
 
     node.name = `memory-core:${memory.id}`;
     node.position.set(...state.core.position);
+    // Render after the shell so memories always draw on top and read clearly
+    // through the surface from any angle.
+    node.renderOrder = 10;
     node.userData = {
       memoryId: memory.id,
       region: state.core.region,
@@ -2842,12 +2407,13 @@ function createRelatedMemoryLink(startPosition, endPosition, memoryId, score) {
   );
   const curve = new THREE.QuadraticBezierCurve3(start, control, end);
   const strength = THREE.MathUtils.clamp(Number(score) || 0, 0, 1);
-  const radius = THREE.MathUtils.lerp(0.006, 0.015, strength);
+  const radius = THREE.MathUtils.lerp(0.004, 0.01, strength);
   const material = new THREE.MeshBasicMaterial({
     color: RELATED_LINK_COLOR,
     transparent: true,
-    opacity: THREE.MathUtils.lerp(0.22, 0.62, strength),
+    opacity: THREE.MathUtils.lerp(0.6, 0.85, strength),
     blending: THREE.AdditiveBlending,
+    depthTest: false,
     depthWrite: false,
   });
   const link = new THREE.Mesh(
@@ -2855,7 +2421,7 @@ function createRelatedMemoryLink(startPosition, endPosition, memoryId, score) {
     material,
   );
   link.name = `related-memory-link:${selectedMemoryId}:${memoryId}`;
-  link.renderOrder = 2;
+  link.renderOrder = 9;
   link.userData = {
     memoryId,
     score: strength,
@@ -2882,31 +2448,37 @@ function disposeGroupContents(group) {
 }
 
 function createActivationConnections(memoryId, state) {
+  if (anatomicalBrainRenderer && !regionScenePositions.size) return;
+
   const start = new THREE.Vector3(...state.core.position);
   state.activations.forEach((activation) => {
     const anchor = REGION_ANCHORS[activation.region];
     if (!anchor) return;
+    const anatomicalPositions = regionScenePositions.get(activation.region);
 
     const targets =
       activation.region === "hippocampus" && anchor.hemispherePositions
         ? Object.entries(anchor.hemispherePositions).map(
             ([hemisphere, position]) => ({
               hemisphere,
-              position,
+              position: anatomicalPositions?.[hemisphere] || position,
               weight:
                 activation.hemispheres?.[hemisphere] ?? activation.weight / 2,
             }),
           )
         : [{
             hemisphere: null,
-            position: anchor.position,
+            position: anatomicalPositions?.center || anchor.position,
             weight: activation.weight,
           }];
 
     targets.forEach((target) => {
+      // Eliminate paths that terminate in empty space: only draw a connection
+      // when a real anatomical position resolved for this region/hemisphere.
+      if (!target.position) return;
       createActivationConnection(memoryId, activation.region, start, {
         ...target,
-        color: anchor.color,
+        color: getRegionColor(activation.region),
       });
     });
   });
@@ -2936,6 +2508,7 @@ function createActivationConnection(
     transparent: true,
     opacity: 0,
     blending: THREE.AdditiveBlending,
+    depthTest: false,
     depthWrite: false,
   });
   const glowMaterial = new THREE.MeshBasicMaterial({
@@ -2943,6 +2516,7 @@ function createActivationConnection(
     transparent: true,
     opacity: 0,
     blending: THREE.AdditiveBlending,
+    depthTest: false,
     depthWrite: false,
     side: THREE.BackSide,
   });
@@ -2970,6 +2544,7 @@ function createActivationConnection(
           transparent: true,
           opacity: 0.92,
           blending: THREE.AdditiveBlending,
+          depthTest: false,
           depthWrite: false,
         }),
       );
@@ -3368,10 +2943,26 @@ function updateMemoryNodeSelection() {
             ? 1.14
             : 1;
     } else {
-      node.material.emissiveIntensity = hovered ? 1 : selected ? 0.9 : 0.3;
-      node.material.opacity =
-        activeMemoryId != null && !active ? 0.24 : 0.96;
-      node.userData.selectionScale = hovered ? 1.28 : selected ? 1.2 : 1;
+      if (hovered) {
+        node.material.emissiveIntensity = 1;
+        node.material.opacity = 1;
+        node.userData.selectionScale = 1.28;
+      } else if (selected) {
+        node.material.emissiveIntensity = 0.9;
+        node.material.opacity = 1;
+        node.userData.selectionScale = 1.2;
+      } else if (activeMemoryId != null) {
+        // A memory is active but this isn't it: keep it subdued.
+        node.material.emissiveIntensity = 0.2;
+        node.material.opacity = 0.38;
+        node.userData.selectionScale = 1;
+      } else {
+        // The anatomical shell is opaque, so idle memories need enough
+        // emissive contrast to remain legible through its overlay pass.
+        node.material.emissiveIntensity = 0.52;
+        node.material.opacity = 0.82;
+        node.userData.selectionScale = 1;
+      }
     }
     node.scale.setScalar(node.userData.selectionScale);
   });
@@ -3407,14 +2998,34 @@ function animateMemoryNodes(elapsed) {
   });
 }
 
-function focusSelectedMemory() {
-  if (!brainCamera || !brainControls || !selectedMemoryId || entityLens) return;
+function focusAnatomicalRegion(region) {
+  if (!regionScenePositions.size || !region || !brainCamera || !brainControls || !anatomicalBrainRenderer) return;
+  const focus = anatomicalBrainRenderer.focusRegion(region, {
+    camera: brainCamera,
+    padding: 2.2,
+  });
+  if (!focus) return;
 
-  const node = getMemoryCore(selectedMemoryId);
-  if (!node) return;
+  const viewDirection = brainCamera.position.clone().sub(brainControls.target);
+  if (!viewDirection.lengthSq()) viewDirection.set(0, 0, 1);
+  viewDirection.setLength(DEEP_BRAIN_REGIONS.has(region) ? 6.4 : 7);
+  const cameraPosition = focus.target.clone().add(viewDirection);
 
-  const target = node.getWorldPosition(new THREE.Vector3());
-  focusCameraOnPoint(target);
+  brainControls.autoRotate = false;
+  if (reduceMotion.matches) {
+    brainCamera.position.copy(cameraPosition);
+    brainControls.target.copy(focus.target);
+    cameraFocus = null;
+    return;
+  }
+
+  cameraFocus = {
+    startedAt: performance.now(),
+    fromPosition: brainCamera.position.clone(),
+    toPosition: cameraPosition,
+    fromTarget: brainControls.target.clone(),
+    toTarget: focus.target,
+  };
 }
 
 function focusCameraOnPoint(target) {
@@ -3425,6 +3036,13 @@ function focusCameraOnPoint(target) {
 
   if (!offset.lengthSq()) offset.set(0, 0, 1);
   offset.setLength(distance);
+  if (reduceMotion.matches) {
+    brainCamera.position.copy(target).add(offset);
+    brainControls.target.copy(target);
+    brainControls.autoRotate = false;
+    cameraFocus = null;
+    return;
+  }
   cameraFocus = {
     startedAt: performance.now(),
     fromPosition: brainCamera.position.clone(),
@@ -3555,8 +3173,30 @@ function formatRelativeDate(value) {
 }
 
 function renderBrainModel() {
+  if (USE_LEGACY_BRAIN) {
+    renderLegacyBrain({
+      canvas: brainCanvas,
+      stage: brainStage,
+      getMemories: getFilteredMemories,
+      getActiveMemoryId,
+      getFocusedRegion,
+      setHoveredMemory,
+      setHoveredRegion,
+      selectMemory,
+      selectRegion,
+      clearSelection,
+      focusEntity,
+      reduceMotion,
+      onReady: ({ camera, controls }) => {
+        brainCamera = camera;
+        brainControls = controls;
+      },
+    });
+    return;
+  }
+
   const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x121718, 0.055);
+  scene.fog = new THREE.FogExp2(0x0a0d12, 0.02);
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 100);
   const renderer = new THREE.WebGLRenderer({
     canvas: brainCanvas,
@@ -3568,21 +3208,21 @@ function renderBrainModel() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.18;
+  renderer.toneMappingExposure = 1;
   camera.position.set(0, 0, 7);
   brainCamera = camera;
   scene.add(brain);
-  scene.add(new THREE.HemisphereLight(0xfff8e9, 0x172527, 2.4));
+  scene.add(new THREE.HemisphereLight(0xcdd6e2, 0x0d1117, 0.6));
 
   const controls = new OrbitControls(camera, brainCanvas);
   brainControls = controls;
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.enablePan = false;
-  controls.minDistance = 4;
-  controls.maxDistance = 14;
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 2.5;
+  controls.minDistance = 5;
+  controls.maxDistance = 12;
+  controls.autoRotate = !reduceMotion.matches;
+  controls.autoRotateSpeed = 0.5;
   controls.addEventListener("start", () => {
     cameraFocus = null;
     controls.autoRotate = false;
@@ -3600,7 +3240,8 @@ function renderBrainModel() {
   brainCanvas.addEventListener("mouseleave", () => {
     setHoveredMemory(null);
     setHoveredRegion(null);
-    controls.autoRotate = selectedMemoryId == null && entityLens == null;
+    controls.autoRotate =
+      !reduceMotion.matches && selectedMemoryId == null && entityLens == null;
   });
   brainCanvas.addEventListener("pointercancel", () => {
     setHoveredMemory(null);
@@ -3635,12 +3276,12 @@ function renderBrainModel() {
     }
 
     const activeMarkerTargets = selectedMemoryId
-      ? regionMarkerHitTargets.filter((target) => target.parent?.visible)
+      ? anatomicalBrainRenderer?.getRegionHitTargets() || []
       : [];
     const [regionHit] = raycaster.intersectObjects(activeMarkerTargets, false);
     if (regionHit) {
       setHoveredMemory(null);
-      setHoveredRegion(regionHit.object.userData.region);
+      setHoveredRegion(regionHit.object.userData.anatomicalRegion);
       brainCanvas.style.cursor = "pointer";
       return;
     }
@@ -3687,57 +3328,119 @@ function renderBrainModel() {
     }
 
     const activeMarkerTargets = selectedMemoryId
-      ? regionMarkerHitTargets.filter((target) => target.parent?.visible)
+      ? anatomicalBrainRenderer?.getRegionHitTargets() || []
       : [];
     const [regionHit] = raycaster.intersectObjects(activeMarkerTargets, false);
-    if (regionHit) selectRegion(regionHit.object.userData.region);
+    if (regionHit) selectRegion(regionHit.object.userData.anatomicalRegion);
     else clearSelection();
   });
 
-  const keyLight = new THREE.DirectionalLight(0xfff3df, 5.2);
+  const keyLight = new THREE.DirectionalLight(0xf2ece0, 1.6);
   keyLight.position.set(-3, 4, 5);
   scene.add(keyLight);
 
-  const rimLight = new THREE.DirectionalLight(0x8ee7ff, 3.2);
-  rimLight.position.set(4, -1, 2);
+  const fillLight = new THREE.DirectionalLight(0x9fb0c6, 0.45);
+  fillLight.position.set(3, -1, 2);
+  scene.add(fillLight);
+
+  const rimLight = new THREE.DirectionalLight(0xcdd6e2, 0.35);
+  rimLight.position.set(0, 2, -6);
   scene.add(rimLight);
 
-  const lowerLight = new THREE.PointLight(0xb7a4ff, 2.8, 12);
-  lowerLight.position.set(-2.5, -3, 3);
-  scene.add(lowerLight);
+  const modelStatus = document.createElement("p");
+  modelStatus.className = "brain-model-status";
+  modelStatus.textContent = "Loading anatomical brain model…";
+  modelStatus.setAttribute("role", "status");
+  brainStage.append(modelStatus);
 
-  new OBJLoader().load("/assets/brain.obj", (model) => {
-    const bounds = new THREE.Box3().setFromObject(model);
-    const center = bounds.getCenter(new THREE.Vector3());
-    const size = bounds.getSize(new THREE.Vector3());
-    const brainContent = new THREE.Group();
+  const brainContent = new THREE.Group();
+  brainContent.name = "brain-content";
+  brainContent.rotation.set(-0.08, -0.45, -0.08);
+  memoryNodeGroup = new THREE.Group();
+  memoryNodeGroup.name = "memory-nodes";
+  memoryNodeGroup.renderOrder = 10;
+  activationConnectionGroup = new THREE.Group();
+  activationConnectionGroup.name = "activation-connections";
+  activationConnectionGroup.renderOrder = 8;
+  relatedMemoryLinkGroup = new THREE.Group();
+  relatedMemoryLinkGroup.name = "related-memory-links";
+  relatedMemoryLinkGroup.renderOrder = 9;
+  entityLensGroup = new THREE.Group();
+  entityLensGroup.name = "entity-lens";
+  entityLensGroup.renderOrder = 11;
+  const regionAnchorGroup = createRegionAnchorGroup();
+  brainContent.add(
+    regionAnchorGroup,
+    activationConnectionGroup,
+    relatedMemoryLinkGroup,
+    entityLensGroup,
+    memoryNodeGroup,
+  );
+  brain.add(brainContent);
 
-    applyBrainMaterial(model);
-    model.position.sub(center);
-    brainContent.scale.setScalar(4.5 / Math.max(size.x, size.y, size.z));
-    brainContent.rotation.set(-0.08, -0.45, -0.08);
+  anatomicalBrainRenderer = createAnatomicalBrainRenderer({
+    url: BRAIN_ATLAS_URL,
+    parent: brainContent,
+    camera,
+    onLoading: () => {
+      brainStage.dataset.modelState = "loading";
+    },
+    onLoad: ({ object, center, size, missingRegions }) => {
+      if (missingRegions.length) {
+        throw new Error(`Anatomical model is missing: ${missingRegions.join(", ")}`);
+      }
+      const scale = 4.0 / Math.max(size.x, size.y, size.z);
+      const localCenter = brainContent.worldToLocal(center.clone());
+      object.scale.setScalar(scale);
+      object.position.copy(localCenter).multiplyScalar(-scale);
+      object.updateMatrixWorld(true);
 
-    memoryNodeGroup = new THREE.Group();
-    memoryNodeGroup.name = "memory-nodes";
-    activationConnectionGroup = new THREE.Group();
-    activationConnectionGroup.name = "activation-connections";
-    relatedMemoryLinkGroup = new THREE.Group();
-    relatedMemoryLinkGroup.name = "related-memory-links";
-    entityLensGroup = new THREE.Group();
-    entityLensGroup.name = "entity-lens";
-    brainContent.add(
-      model,
-      createRegionAnchorGroup(),
-      activationConnectionGroup,
-      relatedMemoryLinkGroup,
-      entityLensGroup,
-      memoryNodeGroup,
-    );
-    if (interiorGlowGroup) brainContent.add(interiorGlowGroup);
-    brain.add(brainContent);
-    renderMemoryNodes();
-    updateActivationConnections();
+      regionScenePositions = new Map();
+      for (const region of Object.keys(REGION_ANCHORS)) {
+        const centerWorld = anatomicalBrainRenderer.getRegionCenter(region);
+        if (!centerWorld) continue;
+        const centerLocal = brainContent.worldToLocal(centerWorld.clone());
+        const radiusWorld = anatomicalBrainRenderer.getRegionRadius(region);
+        // Scale the measured radius into the same scene-local space the memory
+        // nodes live in (the model object is uniformly scaled by `scale`).
+        const radiusLocal = radiusWorld ? radiusWorld * scale : null;
+        regionScenePositions.set(region, {
+          center: centerLocal.toArray(),
+          ...(radiusLocal ? { radius: radiusLocal } : {}),
+        });
+        const leftWorld = anatomicalBrainRenderer.getRegionCenter(region, "left");
+        const rightWorld = anatomicalBrainRenderer.getRegionCenter(region, "right");
+        if (leftWorld) {
+          regionScenePositions.get(region).left = brainContent
+            .worldToLocal(leftWorld.clone()).toArray();
+        }
+        if (rightWorld) {
+          regionScenePositions.get(region).right = brainContent
+            .worldToLocal(rightWorld.clone()).toArray();
+        }
+      }
+
+      // Measured positions are now authoritative. Re-anchor markers before any
+      // labels or activation paths can project from them.
+      regionMarkerPositionsDirty = true;
+      syncRegionMarkerPositions();
+
+      modelStatus.hidden = true;
+      brainStage.dataset.modelState = "ready";
+      // Re-run placement with the measured centers/radii so nodes, connections,
+      // labels, and markers all sit on the real anatomy. render() performs the
+      // full guarded rebuild (memoryNodeState + nodes + markers + connections +
+      // labels) and will early-return if called again before this point.
+      render();
+    },
+    onError: (error) => {
+      console.error("Failed to load anatomical brain model:", error);
+      brainStage.dataset.modelState = "error";
+      modelStatus.textContent = "Anatomical brain model unavailable. Region details remain accessible below.";
+      modelStatus.setAttribute("role", "alert");
+    },
   });
+  anatomicalBrainRenderer.ready.catch(() => {});
 
   function resize() {
     const { width, height } = brainStage.getBoundingClientRect();
@@ -3772,7 +3475,6 @@ function renderBrainModel() {
       animateMemoryNodes(elapsed);
       animateActivationConnections(elapsed);
     }
-    updateBrainShaderUniforms();
     updateRegionLabelPositions(camera);
     renderer.render(scene, camera);
     requestAnimationFrame(animate);

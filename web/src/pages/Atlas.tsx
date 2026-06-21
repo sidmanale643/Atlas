@@ -53,14 +53,20 @@ const SCAFFOLD = `
           aria-label="Rotating three-dimensional model of a human brain"></canvas>
         <ul class="atlas-visual-key" aria-label="Atlas visual key">
           <li><i class="key-memory"></i><span>Memory</span></li>
-          <li><i class="key-region"></i><span>Region activation</span></li>
-          <li><i class="key-path"></i><span>Contribution path</span></li>
-          <li><i class="key-entity key-entity-person"></i><span>Person</span></li>
-          <li><i class="key-entity key-entity-place"></i><span>Place</span></li>
-          <li><i class="key-entity key-entity-object"></i><span>Object</span></li>
-          <li><i class="key-entity key-entity-concept"></i><span>Concept</span></li>
-          <li><i class="key-entity key-entity-organization"></i><span>Organization</span></li>
-          <li><i class="key-relationship"></i><span>Relationship</span></li>
+          <li class="key-region-generic"><i class="key-region"></i><span>Region activation</span></li>
+          <li class="key-legacy-region key-legacy-prefrontal">
+            <i class="key-region"></i><span>Prefrontal cortex</span>
+          </li>
+          <li class="key-legacy-region key-legacy-association">
+            <i class="key-region"></i><span>Association cortex</span>
+          </li>
+          <li class="key-legend-extra"><i class="key-path"></i><span>Contribution path</span></li>
+          <li class="key-legend-extra"><i class="key-entity key-entity-person"></i><span>Person</span></li>
+          <li class="key-legend-extra"><i class="key-entity key-entity-place"></i><span>Place</span></li>
+          <li class="key-legend-extra"><i class="key-entity key-entity-object"></i><span>Object</span></li>
+          <li class="key-legend-extra"><i class="key-entity key-entity-concept"></i><span>Concept</span></li>
+          <li class="key-legend-extra"><i class="key-entity key-entity-organization"></i><span>Organization</span></li>
+          <li class="key-legend-extra"><i class="key-relationship"></i><span>Relationship</span></li>
         </ul>
         <div class="region-labels" id="regionLabels" aria-label="Active brain regions" hidden></div>
         <div class="memory-hover-panel" id="memoryHoverPanel" role="tooltip" hidden></div>
@@ -105,6 +111,9 @@ export default function Atlas() {
     if (booted.current) return;
     booted.current = true;
     document.title = "Atlas · Atlas";
+    const brainMode = new URLSearchParams(window.location.search).get("brain");
+    const stage = document.getElementById("brainStage");
+    if (stage) stage.dataset.renderer = brainMode === "legacy" ? "atlas" : "legacy";
     // Boot the protected brain after the scaffold is in the DOM.
     import("../viz/brain/app.js");
 
@@ -115,21 +124,34 @@ export default function Atlas() {
       const rows = document.querySelectorAll<HTMLTableRowElement>(
         ".region-role-table tr[data-region]",
       );
-      if (!rows.length) return;
-      const roles = new Map<string, string>();
-      rows.forEach((row) => {
-        const region = row.dataset.region;
-        const cell = row.querySelector("td");
-        if (region && cell?.textContent) roles.set(region, cell.textContent.trim());
-      });
-      document
-        .querySelectorAll<HTMLButtonElement>(".region-label[data-region]")
-        .forEach((label) => {
-          const region = label.dataset.region;
-          const role = region ? roles.get(region) : null;
-          if (role) label.setAttribute("data-role", role);
-          else label.removeAttribute("data-role");
+      if (rows.length) {
+        const roles = new Map<string, string>();
+        rows.forEach((row) => {
+          const region = row.dataset.region;
+          const cell = row.querySelector("td");
+          if (region && cell?.textContent) roles.set(region, cell.textContent.trim());
         });
+        document
+          .querySelectorAll<HTMLButtonElement>(".region-label[data-region]")
+          .forEach((label) => {
+            const region = label.dataset.region;
+            const role = region ? roles.get(region) : null;
+            if (role) label.setAttribute("data-role", role);
+            else label.removeAttribute("data-role");
+          });
+      }
+
+      // Simplify the legend to only what is currently visible: the default
+      // stage shows Memory + Region activation; the expanded marks (paths,
+      // entity taxonomy, relationships) appear only when a memory or entity
+      // is selected and actually surfaces them.
+      const detail = document.getElementById("memoryDetail");
+      const hasSelection = !!detail && detail.children.length > 0;
+      const stage = document.getElementById("brainStage");
+      if (stage) {
+        if (hasSelection) stage.setAttribute("data-legend", "expanded");
+        else stage.removeAttribute("data-legend");
+      }
     };
     const observer = new MutationObserver(syncRoles);
     observer.observe(document.body, { childList: true, subtree: true });

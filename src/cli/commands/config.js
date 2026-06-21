@@ -18,7 +18,7 @@ const CONFIG_KEYS = [
   { key: "LLM_MODEL", description: "Model override", default: "(provider default)" },
   { key: "TOKENROUTER_API_KEY", description: "TokenRouter API key" },
   { key: "OPENROUTER_API_KEY", description: "OpenRouter API key" },
-  { key: "PORT", description: "HTTP server port", default: "3000" },
+  { key: "PORT", description: "HTTP server port", default: "3001" },
   { key: "LOG_LEVEL", description: "Log level", default: "info" },
   { key: "ENGRAM_DB_PATH", description: "SQLite database path", default: "./engram.db" },
   { key: "EMBEDDING_MODEL", description: "Embedding model", default: "Xenova/all-MiniLM-L6-v2" },
