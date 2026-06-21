@@ -10,7 +10,95 @@ SQLite is the source of truth. Vectors are embedded locally. Memories are typed,
 
 ---
 
-## Quick start
+## Install and use the CLI
+
+Requires Node.js 18 or newer. The package installs two commands:
+
+- `atlas` — the command-line memory client
+- `atlas-mcp` — the MCP server
+
+Start the MCP server immediately without installing anything:
+
+```bash
+npx atlas-mcp
+```
+
+This shorthand starts the stdio MCP server. To run CLI commands through `npx`,
+select the `atlas` binary explicitly as shown below.
+
+Install the latest version from npm for regular terminal use:
+
+```bash
+npm install --global atlas-mcp
+atlas --version
+```
+
+Or run the CLI without a permanent install through `npx`:
+
+```bash
+npx --yes --package atlas-mcp atlas --version
+```
+
+When using the CLI through `npx`, replace `atlas` in the examples below with
+`npx --yes --package atlas-mcp atlas`.
+
+### Configure Atlas
+
+Atlas reads configuration from environment variables and from `.env` in the
+current directory. Its SQLite database and LanceDB index also default to that
+directory, so create a dedicated data directory and run commands from there:
+
+```bash
+mkdir -p ~/.neurogram
+cd ~/.neurogram
+
+atlas config provider tokenrouter
+atlas config apikey tokenrouter YOUR_TOKENROUTER_API_KEY
+atlas config
+```
+
+To use OpenRouter instead:
+
+```bash
+atlas config provider openrouter
+atlas config apikey openrouter YOUR_OPENROUTER_API_KEY
+```
+
+The configuration commands create `~/.neurogram/.env`. API keys are masked in
+normal `atlas config` output. You can also set individual values:
+
+```bash
+atlas config set ENGRAM_DB_PATH ~/.neurogram/engram.db
+atlas config set LANCEDB_PATH ~/.neurogram/lancedb
+atlas config model YOUR_MODEL_NAME       # optional provider model override
+atlas config get LLM_PROVIDER
+```
+
+Shell environment variables take precedence over values in `.env`. If you run
+Atlas from different directories, use absolute database/index paths or keep
+running it from the same data directory.
+
+### Store and recall memories
+
+The first vector operation downloads the local embedding model and may take a
+little longer. Adding memories also requires the LLM provider key configured
+above.
+
+```bash
+cd ~/.neurogram
+
+atlas add "I prefer dark roast coffee" --type preference --title "Coffee"
+atlas list
+atlas search "coffee preference"
+atlas get MEMORY_ID
+atlas related MEMORY_ID
+```
+
+Use `--json` with commands for machine-readable output, and run
+`atlas <command> --help` for all options. Other commands include `entities`,
+`entity`, `update`, and `delete`.
+
+### Run directly from the repository
 
 ```bash
 npm install
@@ -19,7 +107,8 @@ cp .env.example .env
 npm start              # Express on http://localhost:3000
 ```
 
-Node.js 18+. The default `ATLAS_MODE=local` runs everything on-machine: SQLite for memory, LanceDB for vectors, Transformers.js for embeddings.
+The default `ATLAS_MODE=local` runs everything on-machine: SQLite for memory,
+LanceDB for vectors, and Transformers.js for embeddings.
 
 ### Frontend (Atlas UI)
 
@@ -50,7 +139,7 @@ LANCEDB_TABLE=atlas_memories
 Stdiod MCP server exposing the memory store to any compatible client (Claude Desktop, Cursor, etc.).
 
 ```bash
-npx atlas-mcp          # no clone required
+npx atlas-mcp          # published package; no install or clone required
 npm run mcp            # from this repo
 ```
 
@@ -90,14 +179,8 @@ npm run mcp            # from this repo
 }
 ```
 
-### CLI
-
-```bash
-npm run cli            # atlas <command>
-npm link               # exposes `neurogram` and `atlas-mcp` in your shell
-```
-
-Commands: `add`, `list`, `get`, `search`, `related`, `entities`, `entity`, `update`, `delete`.
+From a repository checkout, use `npm run cli -- <command>` or run `npm link` to
+expose the `atlas` and `atlas-mcp` commands globally.
 
 ---
 

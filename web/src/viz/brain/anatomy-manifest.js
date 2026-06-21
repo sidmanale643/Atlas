@@ -4,7 +4,13 @@ export const BRAIN_ATLAS_SOURCE = Object.freeze({
   sha256: "2b9ad5b53e40e9f0936da74f7be38d2eed15604e26358c3870a0ea13499b9a35",
 });
 
-export const BRAIN_ATLAS_URL = "/assets/brain-atlas.glb";
+// Let Vite treat the atlas as a build asset. Production deploys only
+// `public/app`, so an absolute `/assets/...` URL would point outside the
+// deployment output and the SPA rewrite would return index.html instead.
+export const BRAIN_ATLAS_URL = new URL(
+  "../../../../public/assets/brain-atlas.glb",
+  import.meta.url,
+).href;
 export const REGION_NODE_PREFIX = "region:";
 
 export const BRAIN_ATLAS_EXTRAS = Object.freeze({
