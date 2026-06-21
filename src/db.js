@@ -35,6 +35,7 @@ function initSchema() {
       tags TEXT NOT NULL DEFAULT '[]',
       scope TEXT NOT NULL DEFAULT 'agent',
       source TEXT NOT NULL DEFAULT 'ui',
+      owner_hash TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -325,6 +326,7 @@ function initSchema() {
     ["tags", "TEXT NOT NULL DEFAULT '[]'"],
     ["scope", "TEXT NOT NULL DEFAULT 'agent'"],
     ["version", "INTEGER NOT NULL DEFAULT 1"],
+    ["owner_hash", "TEXT"],
   ];
   for (const [name, definition] of memoryMigrations) {
     if (!memoryColumns.some((column) => column.name === name)) {
@@ -916,10 +918,11 @@ export function createMemory(
       tags,
       scope,
       source,
+      owner_hash,
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'agent', ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'agent', ?, ?, ?, ?)
   `);
   stmt.run(
     id,
@@ -931,6 +934,7 @@ export function createMemory(
     metadata.confidence ?? 0.6,
     JSON.stringify(tags),
     source,
+    metadata.ownerHash || null,
     now,
     now,
   );
@@ -938,25 +942,38 @@ export function createMemory(
   return getMemory(id);
 }
 
-export function getMemory(id) {
+export function getMemory(id, { ownerHash } = {}) {
   const db = getDb();
+  if (ownerHash) {
+    return deserializeMemory(
+      db.prepare("SELECT * FROM memories WHERE id = ? AND owner_hash = ?").get(id, ownerHash),
+    );
+  }
   return deserializeMemory(
     db.prepare("SELECT * FROM memories WHERE id = ?").get(id),
   );
 }
 
-export function getMemoriesByIds(ids) {
+export function getMemoriesByIds(ids, { ownerHash } = {}) {
   if (!ids.length) return [];
   const db = getDb();
   const placeholders = ids.map(() => "?").join(",");
+  const ownerClause = ownerHash ? " AND owner_hash = ?" : "";
   return db
-    .prepare(`SELECT * FROM memories WHERE id IN (${placeholders})`)
-    .all(...ids)
+    .prepare(`SELECT * FROM memories WHERE id IN (${placeholders})${ownerClause}`)
+    .all(...ids, ...(ownerHash ? [ownerHash] : []))
     .map(deserializeMemory);
 }
 
-export function getMemories({ limit = 100, offset = 0, source } = {}) {
+export function getMemories({ limit = 100, offset = 0, source, ownerHash } = {}) {
   const db = getDb();
+  if (ownerHash) {
+    const sourceClause = source ? " AND source = ?" : "";
+    return db
+      .prepare(`SELECT * FROM memories WHERE owner_hash = ?${sourceClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+      .all(ownerHash, ...(source ? [source] : []), limit, offset)
+      .map(deserializeMemory);
+  }
   if (source) {
     return db
       .prepare("SELECT * FROM memories WHERE source = ? ORDER BY created_at DESC LIMIT ? OFFSET ?")
@@ -986,11 +1003,17 @@ export function getMemoryCatalog({
   order = "desc",
   source,
   type,
+  ownerHash,
 } = {}) {
   const db = getDb();
   const conditions = [];
   const params = {};
   const normalizedQuery = String(q).trim();
+
+  if (ownerHash) {
+    conditions.push("m.owner_hash = @ownerHash");
+    params.ownerHash = ownerHash;
+  }
 
   if (normalizedQuery) {
     conditions.push(`
@@ -1121,18 +1144,20 @@ export function removeMemoryFts(id) {
   database.exec("INSERT INTO memories_fts(memories_fts) VALUES('optimize')");
 }
 
-export function searchMemoriesFts(query, { limit = 20 } = {}) {
+export function searchMemoriesFts(query, { limit = 20, ownerHash } = {}) {
   const database = getDb();
   const ftsQuery = buildFtsQuery(query);
   if (!ftsQuery) return [];
   try {
     const rows = database.prepare(`
-      SELECT memory_id, rank
+      SELECT memories_fts.memory_id, memories_fts.rank
       FROM memories_fts
+      JOIN memories m ON m.id = memories_fts.memory_id
       WHERE memories_fts MATCH ?
+        ${ownerHash ? "AND m.owner_hash = ?" : ""}
       ORDER BY rank
       LIMIT ?
-    `).all(ftsQuery, limit);
+    `).all(ftsQuery, ...(ownerHash ? [ownerHash] : []), limit);
     return rows.map((row) => ({ id: row.memory_id, score: row.rank }));
   } catch {
     return [];
@@ -1443,11 +1468,21 @@ export function getEntityCatalog({
   sort = "canonical_name",
   order = "asc",
   kind,
+  ownerHash,
 } = {}) {
   const db = getDb();
   const conditions = [];
   const params = {};
   const normalizedQuery = String(q).trim();
+
+  if (ownerHash) {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM memory_entities owner_me
+      JOIN memories owner_m ON owner_m.id = owner_me.memory_id
+      WHERE owner_me.entity_id = e.id AND owner_m.owner_hash = @ownerHash
+    )`);
+    params.ownerHash = ownerHash;
+  }
 
   if (normalizedQuery) {
     conditions.push(`
@@ -1497,8 +1532,10 @@ export function getEntityCatalog({
         ) AS pending_suggestion_count
       FROM entities e
       LEFT JOIN memory_entities me ON me.entity_id = e.id
+        ${ownerHash ? "AND EXISTS (SELECT 1 FROM memories owner_m WHERE owner_m.id = me.memory_id AND owner_m.owner_hash = @ownerHash)" : ""}
       LEFT JOIN relationships r
-        ON r.source_entity_id = e.id OR r.target_entity_id = e.id
+        ON (r.source_entity_id = e.id OR r.target_entity_id = e.id)
+        ${ownerHash ? "AND EXISTS (SELECT 1 FROM memories owner_rm WHERE owner_rm.id = r.memory_id AND owner_rm.owner_hash = @ownerHash)" : ""}
       ${where}
       GROUP BY e.id
       ORDER BY ${sortColumn} ${sortOrder}, e.id ASC
@@ -2484,6 +2521,18 @@ export function deleteMemory(id) {
   const db = getDb();
   db.prepare("DELETE FROM memories WHERE id = ?").run(id);
   removeFtsForMemory(id);
+}
+
+export function deleteMemoriesByOwner(ownerHash) {
+  const database = getDb();
+  const ids = database.prepare("SELECT id FROM memories WHERE owner_hash = ?")
+    .all(ownerHash).map(({ id }) => id);
+  const remove = database.transaction(() => {
+    database.prepare("DELETE FROM memories WHERE owner_hash = ?").run(ownerHash);
+    for (const id of ids) removeFtsForMemory(id);
+  });
+  remove();
+  return ids;
 }
 
 // --- Graph Data ---

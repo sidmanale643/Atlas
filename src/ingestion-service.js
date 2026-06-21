@@ -121,8 +121,7 @@ export function createIngestionService(dependencies) {
 
     try {
       const canonicalizationContext = await optionalCanonicalizationContext(
-        text,
-        dependencies,
+        text, dependencies, metadata.ownerHash,
       );
       const semanticExtraction = await dependencies.extractAtomicMemories(
         text,
@@ -176,7 +175,7 @@ export function createIngestionService(dependencies) {
   }
 
   async function prepareAtom({ atom, source, ingestionDate, metadata, model }) {
-    const candidates = await writeCandidates(atom.text, dependencies);
+    const candidates = await writeCandidates(atom.text, dependencies, metadata.ownerHash);
     let decision = createDecision("No similar stored memory was found.", 1);
     if (candidates.available && candidates.items.length > 0) {
       try {
@@ -203,7 +202,7 @@ export function createIngestionService(dependencies) {
       const replacement = await dependencies.extractAtomicMemories(
         replacementText,
         ingestionDate,
-        await optionalCanonicalizationContext(replacementText, dependencies),
+        await optionalCanonicalizationContext(replacementText, dependencies, metadata.ownerHash),
       );
       if (replacement.memories.length !== 1) {
         throw new Error("Memory update replacement must resolve to exactly one atomic memory");
@@ -322,20 +321,24 @@ export function createIngestionService(dependencies) {
   return { ingest, enqueue, runIngestion, reprocess };
 }
 
-async function optionalCanonicalizationContext(text, dependencies) {
+async function optionalCanonicalizationContext(text, dependencies, ownerHash) {
   try {
-    return await retrieveExtractionContext(text, dependencies);
+    return await retrieveExtractionContext(text, { ...dependencies, ownerHash });
   } catch {
     return { entities: [] };
   }
 }
 
-async function writeCandidates(text, dependencies) {
+async function writeCandidates(text, dependencies, ownerHash) {
   try {
-    const hits = await dependencies.searchMemoryVectors(text, { limit: 5 });
+    const hits = await dependencies.searchMemoryVectors(text, { limit: 50 });
     return {
       available: true,
-      items: hits.map(({ id }) => serializeCandidate(id, dependencies)).filter(Boolean),
+      items: hits
+        .filter(({ id }) => !ownerHash || dependencies.getMemory(id)?.owner_hash === ownerHash)
+        .slice(0, 5)
+        .map(({ id }) => serializeCandidate(id, dependencies))
+        .filter(Boolean),
     };
   } catch {
     return { available: false, items: [] };
@@ -356,6 +359,7 @@ function atomMetadata(atom, metadata) {
     title: atom.summary || atom.text.slice(0, 50),
     confidence: atom.durability?.confidence ?? DEFAULT_METADATA.confidence,
     tags: Array.isArray(metadata.tags) ? metadata.tags : [],
+    ...(metadata.ownerHash ? { ownerHash: metadata.ownerHash } : {}),
   };
 }
 
