@@ -130,6 +130,7 @@ export interface GraphNode {
   label: string;
   type: "memory" | "entity";
   memoryType?: string;
+  category?: string | null;
   kind?: EntityKind;
   [key: string]: unknown;
 }

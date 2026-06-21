@@ -1,7 +1,7 @@
 export const REGION_COLORS = Object.freeze({
   hippocampus: "#ffd38a",
   prefrontal: "#FF7A90",
-  amygdala: "#ff8fa8",
+  amygdala: "#ff7058",
   temporalCortex: "#A78BFA",
   parietalCortex: "#7ee8d3",
   basalGanglia: "#8B7CFF",
@@ -76,7 +76,7 @@ export const REGION_ANCHORS = Object.freeze({
   amygdala: {
     label: "Amygdala",
     role: "Tags experiences with emotional salience.",
-    position: [0.82, -0.78, 0.72],
+    position: [0.82, -0.78, 1.02],
     activationRadius: [0.82, 0.72, 0.82],
     color: REGION_COLORS.amygdala,
     markerScale: 0.72,

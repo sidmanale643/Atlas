@@ -220,13 +220,25 @@
 .svg :global(.ng-node-label) {
   font-family: var(--font-mono);
   font-size: 10px;
-  fill: var(--muted);
+  fill: #8a93a3;
+  pointer-events: none;
+}
+.svg :global(.ng-node-status) {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  fill: var(--faint);
   pointer-events: none;
 }
 .svg :global(.ng-edge-label) {
   font-family: var(--font-mono);
   font-size: 9px;
-  fill: var(--faint);
+  fill: var(--muted);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
   pointer-events: none;
 }
 .svg :global(.ng-edge) {
@@ -255,6 +267,10 @@
 .svg :global(.ng-edge.active) {
   stroke: var(--green) !important;
   stroke-opacity: 0.85;
+}
+.svg :global(.ng-node.unlinked:not(.highlighted) .ng-shape) {
+  stroke-dasharray: 2 2;
+  opacity: 0.68;
 }
 
 /* ------ tooltip ------ */
