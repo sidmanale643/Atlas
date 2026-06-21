@@ -96,6 +96,66 @@ function nodeRadius(d: SimNode): number {
   return 6 + (d.salience ?? 0.5) * 10;
 }
 
+const NODE_LABEL_LINE_LENGTH = 24;
+const NODE_LABEL_MAX_LINES = 2;
+const NODE_LABEL_CHAR_WIDTH = 6.1;
+const NODE_LABEL_LINE_HEIGHT = 12;
+
+function labelLines(label: string | undefined): string[] {
+  if (!label) return [];
+
+  const normalized = label.trim();
+  const words = normalized.split(/\s+/);
+  const lines: string[] = [];
+  let line = "";
+  let consumed = 0;
+
+  for (const word of words) {
+    if (!line) {
+      line = word;
+      consumed += 1;
+      continue;
+    }
+
+    const candidate = line ? `${line} ${word}` : word;
+    if (candidate.length <= NODE_LABEL_LINE_LENGTH) {
+      line = candidate;
+      consumed += 1;
+      continue;
+    }
+
+    lines.push(truncate(line, NODE_LABEL_LINE_LENGTH));
+    line = "";
+    if (lines.length === NODE_LABEL_MAX_LINES) break;
+
+    line = word;
+    consumed += 1;
+  }
+
+  if (line && lines.length < NODE_LABEL_MAX_LINES) {
+    lines.push(truncate(line, NODE_LABEL_LINE_LENGTH));
+  }
+
+  if (consumed < words.length && lines.length) {
+    const last = lines.length - 1;
+    const withoutEllipsis = lines[last].replace(/…$/, "");
+    lines[last] = `${withoutEllipsis.slice(0, NODE_LABEL_LINE_LENGTH - 1)}…`;
+  }
+
+  return lines;
+}
+
+function collisionRadius(d: SimNode): number {
+  const lines = labelLines(d.label);
+  const labelHalfWidth =
+    Math.max(0, ...lines.map((line) => line.length)) *
+    NODE_LABEL_CHAR_WIDTH *
+    0.5;
+  const labelBottom =
+    nodeRadius(d) + 13 + Math.max(0, lines.length - 1) * NODE_LABEL_LINE_HEIGHT;
+  return Math.max(nodeRadius(d) + 8, labelHalfWidth + 14, labelBottom + 8);
+}
+
 /* Memory brightness scales with salience; entities stay dim/outlined. */
 function memoryFill(d: SimNode): string {
   const s = d.salience ?? 0.5;
@@ -304,7 +364,16 @@ export function useForceGraph({
 
     /* working copies so the simulation can mutate x/y/fx/fy freely */
     const nodes: SimNode[] = data.nodes.map((d) => ({ ...d }) as SimNode);
-    const edges: SimEdge[] = getEdges(data).map((d) => ({ ...d }) as SimEdge);
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const edges: SimEdge[] = getEdges(data)
+      .filter(
+        (edge) =>
+          nodeIds.has(edgeId(edge.source)) && nodeIds.has(edgeId(edge.target)),
+      )
+      .map((d) => ({ ...d }) as SimEdge);
+    const linkedNodeIds = new Set(
+      edges.flatMap((edge) => [edgeId(edge.source), edgeId(edge.target)]),
+    );
     nodesRef.current = nodes;
     edgesRef.current = edges;
 
@@ -315,14 +384,18 @@ export function useForceGraph({
         d3
           .forceLink<SimNode, SimEdge>(edges)
           .id((d) => d.id)
-          .distance(120)
+          .distance(150)
           .strength(0.4),
       )
-      .force("charge", d3.forceManyBody().strength(-260))
+      .force("charge", d3.forceManyBody().strength(-340))
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force(
         "collision",
-        d3.forceCollide<SimNode>().radius((d) => nodeRadius(d) + 4),
+        d3
+          .forceCollide<SimNode>()
+          .radius((d) => collisionRadius(d))
+          .strength(0.9)
+          .iterations(2),
       )
       .force("x", d3.forceX(width / 2).strength(0.04))
       .force("y", d3.forceY(height / 2).strength(0.04));
@@ -366,7 +439,9 @@ export function useForceGraph({
       .selectAll<SVGGElement, SimNode>("g")
       .data(nodes)
       .join("g")
-      .attr("class", "ng-node")
+      .attr("class", (d) =>
+        `ng-node${linkedNodeIds.has(d.id) ? "" : " unlinked"}`,
+      )
       .call(dragBehavior(simulation));
     nodeSelRef.current = nodeSel;
 
@@ -395,15 +470,41 @@ export function useForceGraph({
           .attr("stroke-opacity", 0.95);
       }
 
-      g.append("text")
+      const text = g
+        .append("text")
         .attr("class", "ng-node-label")
-        .attr("dy", nodeRadius(d) + 13)
         .attr("text-anchor", "middle")
         .attr("paint-order", "stroke")
         .attr("stroke", C.bg)
-        .attr("stroke-width", 3)
-        .attr("stroke-linejoin", "round")
-        .text(truncate(d.label, 22));
+        .attr("stroke-width", 4)
+        .attr("stroke-linejoin", "round");
+
+      labelLines(d.label).forEach((line, index) => {
+        text
+          .append("tspan")
+          .attr("x", 0)
+          .attr(
+            "dy",
+            index === 0 ? nodeRadius(d) + 13 : NODE_LABEL_LINE_HEIGHT,
+          )
+          .text(line);
+      });
+
+      if (!linkedNodeIds.has(d.id)) {
+        g.append("text")
+          .attr("class", "ng-node-status")
+          .attr(
+            "dy",
+            nodeRadius(d) +
+              27 +
+              Math.max(0, labelLines(d.label).length - 1) *
+                NODE_LABEL_LINE_HEIGHT,
+          )
+          .attr("text-anchor", "middle")
+          .text("unlinked");
+      }
+
+      g.append("title").text(d.label);
     });
 
     nodeSel
@@ -449,9 +550,30 @@ export function useForceGraph({
     });
 
     simulation.on("tick", () => {
+      nodeSel.attr("transform", (d) => {
+        const margin = collisionRadius(d);
+        d.x = Math.max(margin, Math.min(width - margin, d.x ?? width / 2));
+        d.y = Math.max(margin, Math.min(height - margin, d.y ?? height / 2));
+        return `translate(${d.x},${d.y})`;
+      });
+
       edgeSel
-        .attr("x1", (d) => (d.source as SimNode).x ?? 0)
-        .attr("y1", (d) => (d.source as SimNode).y ?? 0)
+        .attr("x1", (d) => {
+          const s = d.source as SimNode;
+          const t = d.target as SimNode;
+          const dx = (t.x ?? 0) - (s.x ?? 0);
+          const dy = (t.y ?? 0) - (s.y ?? 0);
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          return (s.x ?? 0) + (dx / dist) * nodeRadius(s);
+        })
+        .attr("y1", (d) => {
+          const s = d.source as SimNode;
+          const t = d.target as SimNode;
+          const dx = (t.x ?? 0) - (s.x ?? 0);
+          const dy = (t.y ?? 0) - (s.y ?? 0);
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          return (s.y ?? 0) + (dy / dist) * nodeRadius(s);
+        })
         .attr("x2", (d) => {
           const s = d.source as SimNode;
           const t = d.target as SimNode;
@@ -483,7 +605,6 @@ export function useForceGraph({
             2,
         );
 
-      nodeSel.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
     });
 
     /* responsive: keep centering force in sync with the canvas size */

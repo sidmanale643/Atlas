@@ -965,6 +965,41 @@
   color: var(--faint);
 }
 
+.memory-delete {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  margin: -6px 0 -6px 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.memory-delete svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.memory-delete:hover,
+.memory-delete:focus-visible {
+  color: #ff8e8e;
+  outline: 1px solid rgba(255, 142, 142, 0.45);
+}
+
+.memory-delete:disabled {
+  opacity: 0.4;
+  cursor: wait;
+}
+
 /* semantic match score badge (inserted by app.js) */
 .memory-similarity {
   color: var(--green);
@@ -1977,8 +2012,11 @@
   }
 
   .memory-card-top time {
-    width: 100%;
     margin-left: 0;
+  }
+
+  .memory-card-top .memory-number {
+    margin-right: auto;
   }
 
   .memory-text {

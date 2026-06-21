@@ -280,6 +280,52 @@ clearButton.addEventListener("click", async () => {
   render();
 });
 
+async function deleteMemory(memory, button) {
+  const shouldDelete = window.confirm(
+    `Permanently delete “${memory.summary || memory.text}”?`,
+  );
+  if (!shouldDelete) return;
+
+  button.disabled = true;
+  button.setAttribute("aria-label", "Deleting memory");
+
+  try {
+    const response = await fetch(
+      `/api/memories/${encodeURIComponent(memory.id)}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Delete failed (${response.status})`);
+    }
+
+    memories = memories.filter((item) => item.id !== memory.id);
+    entityGraphCache.clear();
+    relatedMemoryCache.clear();
+    resetRelatedMemoryState();
+
+    if (selectedMemoryId === memory.id) {
+      selectedMemoryId = null;
+      selectedRegion = null;
+      selectedRegionMemoryId = null;
+      hoveredRegion = null;
+      cameraFocus = null;
+    }
+    if (hoveredMemoryId === memory.id) setHoveredMemory(null);
+    resetEntityTraversal();
+
+    if (searchQuery.trim()) {
+      scheduleSemanticSearch({ immediate: true });
+    }
+    render();
+  } catch (error) {
+    console.error("Failed to delete memory:", error);
+    window.alert(error.message || "Could not delete this memory.");
+    button.disabled = false;
+    button.setAttribute("aria-label", "Delete memory");
+  }
+}
+
 clearSelectionButton.addEventListener("click", clearSelection);
 brainFullscreenButton.addEventListener("click", async () => {
   try {
@@ -1924,6 +1970,18 @@ function renderMemoryList() {
       : `TRACE ${String(filtered.length - index).padStart(2, "0")}`;
     card.querySelector("time").textContent = formatDate(memory.createdAt);
     card.querySelector(".memory-text").textContent = memory.text;
+    const deleteButton = card.querySelector(".memory-delete");
+    deleteButton.setAttribute(
+      "aria-label",
+      `Delete memory: ${memory.summary || memory.text}`,
+    );
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void deleteMemory(memory, deleteButton);
+    });
+    deleteButton.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+    });
     card.dataset.memoryId = memory.id;
     card.tabIndex = 0;
     card.setAttribute("role", "button");

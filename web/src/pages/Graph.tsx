@@ -297,11 +297,15 @@ export default function GraphPage() {
 function NodeTooltip({ node }: { node: SimNode }) {
   if (node.type === "memory") {
     const top = dominantType(node.types as NodeTypeWeight[] | undefined);
+    const category = typeof node.category === "string" && node.category
+      ? capitalize(node.category)
+      : null;
     return (
       <>
         <span className={styles.tipLabel}>Memory</span>
         <span className={styles.tipTitle}>{node.label}</span>
         <span className={styles.tipMeta}>
+          {category ? `${category} · ` : ""}
           {top ? capitalize(top) : "Unclassified"} · salience{" "}
           {(node.salience ?? 0).toFixed(2)}
         </span>
@@ -359,6 +363,13 @@ function DetailPanel({
                     {capitalize(t)}
                   </span>
                 ))}
+              </div>
+            </DetailField>
+          ) : null}
+          {typeof node.category === "string" && node.category ? (
+            <DetailField label="Category">
+              <div className={styles.tagRow}>
+                <span className={styles.tag}>{capitalize(node.category)}</span>
               </div>
             </DetailField>
           ) : null}
