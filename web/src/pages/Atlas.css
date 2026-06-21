@@ -101,34 +101,6 @@
 }
 .composer-meta #memoryQuota[data-reached="true"] { color: #ff9b8c; }
 
-.memory-quota-dialog {
-  width: min(430px, calc(100vw - 32px));
-  padding: 0;
-  border: 1px solid var(--green-mid);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--text);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65), var(--glow-soft);
-}
-.memory-quota-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.72);
-  backdrop-filter: blur(3px);
-}
-.memory-quota-dialog__body { padding: 28px; }
-.memory-quota-dialog__eyebrow {
-  margin: 0 0 10px;
-  color: var(--green-mid);
-  font: 11px var(--font-mono);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-.memory-quota-dialog h2 { margin: 0 0 12px; font-size: 24px; }
-.memory-quota-dialog p:not(.memory-quota-dialog__eyebrow) {
-  margin: 0 0 22px;
-  color: var(--muted);
-  line-height: 1.6;
-}
-
 /* primary action — solid phosphor key */
 .record-button {
   display: inline-flex;
@@ -963,6 +935,41 @@
 .memory-card-top time {
   margin-left: auto;
   color: var(--faint);
+}
+
+.memory-delete {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  margin: -6px 0 -6px 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.memory-delete svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.memory-delete:hover,
+.memory-delete:focus-visible {
+  color: #ff8e8e;
+  outline: 1px solid rgba(255, 142, 142, 0.45);
+}
+
+.memory-delete:disabled {
+  opacity: 0.4;
+  cursor: wait;
 }
 
 /* semantic match score badge (inserted by app.js) */
@@ -1977,8 +1984,11 @@
   }
 
   .memory-card-top time {
-    width: 100%;
     margin-left: 0;
+  }
+
+  .memory-card-top .memory-number {
+    margin-right: auto;
   }
 
   .memory-text {

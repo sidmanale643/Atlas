@@ -10,6 +10,31 @@ import { EXTRACTION_SCHEMA_VERSION } from "./schemas.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.ENGRAM_DB_PATH || join(__dirname, "..", "engram.db");
 
+// Canonical first-person identity. Neurogram is a single-user system, so every
+// first-person reference (self/user/I/owner) collapses to one person entity.
+// This gives relationship subjects a stable anchor (e.g. "User → Python:
+// works with") instead of fragmenting across "self"/"user"/"I" nodes. The
+// display name is configurable via NEUROGRAM_USER_NAME.
+const USER_ENTITY_NAME = (process.env.NEUROGRAM_USER_NAME || "User").trim() || "User";
+const FIRST_PERSON_KEYS = new Set([
+  normalizeEntityKey(USER_ENTITY_NAME),
+  "user",
+  "self",
+  "i",
+  "me",
+  "myself",
+  "mine",
+  "owner",
+  "operator",
+  lowercaseEnvList("NEUROGRAM_USER_ALIASES"),
+].flat().filter(Boolean));
+
+function lowercaseEnvList(name) {
+  const raw = process.env[name];
+  if (!raw) return [];
+  return raw.split(/[,\s]+/).map((token) => normalizeEntityKey(token)).filter(Boolean);
+}
+
 let db;
 
 export function getDb() {
@@ -276,6 +301,16 @@ function initSchema() {
       ip_hash TEXT PRIMARY KEY,
       submission_count INTEGER NOT NULL DEFAULT 0 CHECK (submission_count >= 0),
       locked_at TEXT,
+      claimed_account_hash TEXT,
+      claimed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_account_quotas (
+      account_hash TEXT PRIMARY KEY,
+      submission_count INTEGER NOT NULL DEFAULT 0 CHECK (submission_count >= 0),
+      locked_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -350,6 +385,10 @@ function initSchema() {
   }
 
   migrateSourceTables();
+  addMissingColumns("memory_ip_quotas", [
+    ["claimed_account_hash", "TEXT"],
+    ["claimed_at", "TEXT"],
+  ]);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source);
@@ -483,7 +522,7 @@ export function getIpMemoryQuota(ipHash, limit = 10) {
   const row = getDb().prepare(`
     SELECT submission_count FROM memory_ip_quotas WHERE ip_hash = ?
   `).get(ipHash);
-  return formatIpMemoryQuota(row?.submission_count || 0, limit);
+  return formatMemoryQuota(row?.submission_count || 0, limit, false);
 }
 
 export function claimIpMemoryQuota(ipHash, limit = 10) {
@@ -510,9 +549,115 @@ export function claimIpMemoryQuota(ipHash, limit = 10) {
   })();
 }
 
-function formatIpMemoryQuota(used, limit) {
+export function getAccountMemoryQuota(accountHash, limit = 25) {
+  const row = getDb().prepare(`
+    SELECT submission_count FROM memory_account_quotas WHERE account_hash = ?
+  `).get(accountHash);
+  return formatMemoryQuota(row?.submission_count || 0, limit, true);
+}
+
+export function claimAccountMemoryQuota(accountHash, limit = 25) {
+  const database = getDb();
+  return database.transaction(() => {
+    const now = new Date().toISOString();
+    database.prepare(`
+      INSERT OR IGNORE INTO memory_account_quotas (
+        account_hash, submission_count, created_at, updated_at
+      ) VALUES (?, 0, ?, ?)
+    `).run(accountHash, now, now);
+    const result = database.prepare(`
+      UPDATE memory_account_quotas
+      SET submission_count = submission_count + 1,
+          locked_at = CASE
+            WHEN submission_count + 1 >= ? THEN COALESCE(locked_at, ?)
+            ELSE locked_at
+          END,
+          updated_at = ?
+      WHERE account_hash = ? AND submission_count < ?
+    `).run(limit, now, now, accountHash, limit);
+    return {
+      allowed: result.changes === 1,
+      ...getAccountMemoryQuota(accountHash, limit),
+    };
+  })();
+}
+
+export function claimGuestMemoryQuotaForAccount({
+  ipHash,
+  accountHash,
+  accountLimit = 25,
+}) {
+  const database = getDb();
+  return database.transaction(() => {
+    const now = new Date().toISOString();
+    database.prepare(`
+      INSERT OR IGNORE INTO memory_ip_quotas (
+        ip_hash, submission_count, created_at, updated_at
+      ) VALUES (?, 0, ?, ?)
+    `).run(ipHash, now, now);
+
+    const guestQuota = database.prepare(`
+      SELECT submission_count, claimed_account_hash
+      FROM memory_ip_quotas WHERE ip_hash = ?
+    `).get(ipHash);
+    if (guestQuota.claimed_account_hash) {
+      return {
+        claimed: false,
+        transferredMemories: 0,
+        transferredSources: 0,
+        ...getAccountMemoryQuota(accountHash, accountLimit),
+      };
+    }
+
+    database.prepare(`
+      INSERT OR IGNORE INTO memory_account_quotas (
+        account_hash, submission_count, created_at, updated_at
+      ) VALUES (?, 0, ?, ?)
+    `).run(accountHash, now, now);
+    database.prepare(`
+      UPDATE memory_account_quotas
+      SET submission_count = submission_count + ?,
+          locked_at = CASE
+            WHEN submission_count + ? >= ? THEN COALESCE(locked_at, ?)
+            ELSE locked_at
+          END,
+          updated_at = ?
+      WHERE account_hash = ?
+    `).run(
+      guestQuota.submission_count,
+      guestQuota.submission_count,
+      accountLimit,
+      now,
+      now,
+      accountHash,
+    );
+    const memories = database.prepare(`
+      UPDATE memories SET owner_hash = ?, updated_at = ? WHERE owner_hash = ?
+    `).run(accountHash, now, ipHash);
+    const sources = database.prepare(`
+      UPDATE memory_sources
+      SET metadata_json = json_set(metadata_json, '$.ownerHash', ?), updated_at = ?
+      WHERE json_extract(metadata_json, '$.ownerHash') = ?
+    `).run(accountHash, now, ipHash);
+    database.prepare(`
+      UPDATE memory_ip_quotas
+      SET claimed_account_hash = ?, claimed_at = ?, updated_at = ?
+      WHERE ip_hash = ? AND claimed_account_hash IS NULL
+    `).run(accountHash, now, now, ipHash);
+
+    return {
+      claimed: true,
+      transferredMemories: memories.changes,
+      transferredSources: sources.changes,
+      ...getAccountMemoryQuota(accountHash, accountLimit),
+    };
+  })();
+}
+
+function formatMemoryQuota(used, limit, authenticated) {
   const normalizedUsed = Math.max(0, Number(used) || 0);
   return {
+    authenticated,
     limit,
     used: normalizedUsed,
     remaining: Math.max(0, limit - normalizedUsed),
@@ -1982,6 +2127,7 @@ function persistDerivedMemoryGraph(memoryId, extraction) {
       mention: ent.mention,
       kind: ent.kind,
     });
+    if (entityId === null) continue;
     for (const alias of [name, ent.mention, ent.canonicalName]) {
       const key = normalizeEntityKey(alias);
       if (key) entityIds.set(key, entityId);
@@ -2012,6 +2158,9 @@ function persistDerivedMemoryGraph(memoryId, extraction) {
         mention: tgtName,
         kind: "concept",
       });
+    // Skip edges where either endpoint was a generic mention; a relationship
+    // between two real nodes is meaningless if one side never materialized.
+    if (srcId === null || tgtId === null) continue;
     addRelationship(
       srcId,
       tgtId,
@@ -2024,6 +2173,13 @@ function persistDerivedMemoryGraph(memoryId, extraction) {
         .join(" … "),
     );
   }
+
+  // Re-persisting this memory's graph may have orphaned entities that were
+  // only referenced by the previous revision (update path deletes links first)
+  // and may have introduced case-variant duplicates. Prune then merge so the
+  // entity set stays clean and deduped within the same session.
+  pruneOrphanEntities();
+  mergeDuplicateEntities();
 }
 
 function mergeTags(existingJson, incomingTags) {
@@ -2070,6 +2226,7 @@ function mergeDuplicateEntities() {
     .prepare("SELECT id, canonical_name, kind FROM entities ORDER BY id")
     .all();
   const canonicalIds = new Map();
+  const canonicalUserKey = `person:${normalizeEntityKey(USER_ENTITY_NAME)}`;
   const merge = db.transaction(() => {
     const copyMemoryLinks = db.prepare(`
       INSERT OR IGNORE INTO memory_entities (
@@ -2135,7 +2292,10 @@ function mergeDuplicateEntities() {
     const deleteEntity = db.prepare("DELETE FROM entities WHERE id = ?");
 
     for (const entity of entities) {
-      const key = `${entity.kind}:${normalizeEntityKey(entity.canonical_name)}`;
+      const normalizedName = normalizeEntityKey(entity.canonical_name);
+      const key = FIRST_PERSON_KEYS.has(normalizedName)
+        ? canonicalUserKey
+        : `${entity.kind}:${normalizedName}`;
       const canonicalId = canonicalIds.get(key);
       if (!canonicalId) {
         canonicalIds.set(key, entity.id);
@@ -2160,9 +2320,42 @@ function mergeDuplicateEntities() {
   });
 
   merge();
+
+  const canonicalUserId = canonicalIds.get(canonicalUserKey);
+  if (canonicalUserId) {
+    db.prepare(`
+      UPDATE entities
+      SET canonical_name = ?, kind = 'person'
+      WHERE id = ?
+    `).run(USER_ENTITY_NAME, canonicalUserId);
+    addEntityAlias(canonicalUserId, USER_ENTITY_NAME, true);
+  }
+}
+
+/**
+ * Delete entities that no longer participate in the graph — neither linked to
+ * any memory nor referenced by any relationship. Called after memory delete
+ * and after derived-graph persistence so the entity set stays closed over
+ * "currently referenced". Returns the count of entities removed.
+ */
+export function pruneOrphanEntities() {
+  const db = getDb();
+  return db
+    .prepare(`
+      DELETE FROM entities
+      WHERE id NOT IN (
+        SELECT entity_id FROM memory_entities
+        UNION
+        SELECT source_entity_id FROM relationships
+        UNION
+        SELECT target_entity_id FROM relationships
+      )
+    `)
+    .run().changes;
 }
 
 const GENERIC_ENTITY_ALIASES = new Set([
+  "agent",
   "he",
   "her",
   "hers",
@@ -2180,6 +2373,7 @@ const GENERIC_ENTITY_ALIASES = new Set([
   "girl",
   "guy",
   "man",
+  "main agent",
   "me",
   "myself",
   "object",
@@ -2254,9 +2448,49 @@ function findExactEntityMatches(value, kind) {
     .all(kind, key, key);
 }
 
+function resolveUserEntity() {
+  const db = getDb();
+  const existing = findExactEntityMatches(USER_ENTITY_NAME, "person");
+  if (existing.length > 0) {
+    const entityId = existing[0].id;
+    addEntityAlias(entityId, USER_ENTITY_NAME, true);
+    return entityId;
+  }
+  const result = db
+    .prepare("INSERT INTO entities (canonical_name, kind) VALUES (?, ?)")
+    .run(USER_ENTITY_NAME, "person");
+  const entityId = result.lastInsertRowid;
+  addEntityAlias(entityId, USER_ENTITY_NAME, true);
+  return entityId;
+}
+
 function resolveEntityForExtraction({ canonicalName, mention, kind }) {
   const db = getDb();
   const canonical = normalizeEntityName(canonicalName || mention);
+
+  // First-person references collapse to the canonical User identity. This is
+  // the single-user system's anchor: "self"/"user"/"I" all resolve to one
+  // person entity regardless of how the LLM phrased or classified the mention.
+  if (
+    FIRST_PERSON_KEYS.has(normalizeEntityKey(canonical))
+    || (mention && FIRST_PERSON_KEYS.has(normalizeEntityKey(mention)))
+  ) {
+    const entityId = resolveUserEntity();
+    if (isUsefulEntityAlias(canonical) && !FIRST_PERSON_KEYS.has(normalizeEntityKey(canonical))) {
+      addEntityAlias(entityId, canonical, false);
+    }
+    if (isUsefulEntityAlias(mention) && !FIRST_PERSON_KEYS.has(normalizeEntityKey(mention))) {
+      addEntityAlias(entityId, mention, false);
+    }
+    return entityId;
+  }
+
+  // Generic mentions (pronouns, role nouns like "person"/"agent") carry no
+  // identity. Rather than creating floating nodes, skip linking entirely.
+  if (!isUsefulEntityAlias(canonical) && !isUsefulEntityAlias(mention)) {
+    return null;
+  }
+
   const canonicalMatches = findExactEntityMatches(canonical, kind);
   if (canonicalMatches.length === 1) {
     const entityId = canonicalMatches[0].id;
@@ -2521,6 +2755,9 @@ export function deleteMemory(id) {
   const db = getDb();
   db.prepare("DELETE FROM memories WHERE id = ?").run(id);
   removeFtsForMemory(id);
+  // Cascade removes memory_entities/relationships, but the FK does not prune
+  // the entities themselves — remove anything now left unreferenced.
+  pruneOrphanEntities();
 }
 
 export function deleteMemoriesByOwner(ownerHash) {
@@ -2530,6 +2767,7 @@ export function deleteMemoriesByOwner(ownerHash) {
   const remove = database.transaction(() => {
     database.prepare("DELETE FROM memories WHERE owner_hash = ?").run(ownerHash);
     for (const id of ids) removeFtsForMemory(id);
+    pruneOrphanEntities();
   });
   remove();
   return ids;
@@ -2542,7 +2780,7 @@ export function getGraphData() {
 
   const memoryRows = db
     .prepare(
-      `SELECT m.id, m.raw_text, m.summary, m.source, m.created_at,
+      `SELECT m.id, m.raw_text, m.summary, m.source, m.type AS category, m.created_at,
               e.extraction_json
        FROM memories m
        LEFT JOIN memory_extractions e ON e.id = (
@@ -2564,6 +2802,7 @@ export function getGraphData() {
       label: row.summary || row.raw_text || row.id,
       text: row.raw_text,
       source: row.source,
+      category: row.category || extraction?.category || null,
       salience: extraction?.salience ?? 0.5,
       types: extraction?.types ?? [],
       createdAt: row.created_at,
@@ -2577,6 +2816,7 @@ export function getGraphData() {
        FROM entities e
        LEFT JOIN memory_entities me ON me.entity_id = e.id
        GROUP BY e.id
+       HAVING memory_count > 0
        ORDER BY memory_count DESC, e.canonical_name ASC`
     )
     .all();
@@ -2627,9 +2867,14 @@ export function getGraphData() {
       targetName: row.target_name,
     }));
 
+  const entityNodeIds = new Set(entityNodes.map((node) => node.id));
+  const renderableRelationshipEdges = relationshipEdges.filter(
+    (edge) => entityNodeIds.has(edge.source) && entityNodeIds.has(edge.target)
+  );
+
   return {
     nodes: [...memoryNodes, ...entityNodes],
-    edges: [...memoryEntityEdges, ...relationshipEdges],
+    edges: [...memoryEntityEdges, ...renderableRelationshipEdges],
   };
 }
 
@@ -2721,6 +2966,20 @@ export function auditMemoryIntegrity() {
       code: "orphaned_annotation",
       annotationId: row.id,
       memoryId: row.memory_id,
+    });
+  }
+  for (const row of database.prepare(`
+    SELECT e.id, e.canonical_name, e.kind
+    FROM entities e
+    WHERE NOT EXISTS (SELECT 1 FROM memory_entities me WHERE me.entity_id = e.id)
+      AND NOT EXISTS (SELECT 1 FROM relationships r
+                      WHERE r.source_entity_id = e.id OR r.target_entity_id = e.id)
+  `).all()) {
+    findings.push({
+      code: "orphaned_entity",
+      entityId: row.id,
+      name: row.canonical_name,
+      kind: row.kind,
     });
   }
   for (const row of database.prepare(`

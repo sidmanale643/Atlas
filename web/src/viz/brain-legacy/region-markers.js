@@ -7,8 +7,6 @@ const REGION_MARKER_SHAPES = Object.freeze({
   temporalCortex: { scale: [0.52, 0.3, 0.48], rotation: [0.08, 0.32, -0.16] },
   parietalCortex: { scale: [0.46, 0.44, 0.58], rotation: [-0.25, 0.18, 0.24] },
   motorCortex: { scale: [0.3, 0.64, 0.32], rotation: [0.42, 0.06, -0.42] },
-  amygdala: { scale: [0.24, 0.18, 0.3], rotation: [0.2, 0.22, -0.08] },
-  insula: { scale: [0.38, 0.5, 0.24], rotation: [0.12, 0.54, -0.18] },
   entorhinal: { scale: [0.34, 0.2, 0.26], rotation: [0.18, 0.18, 0.12] },
 });
 
@@ -362,6 +360,154 @@ function createHippocampusMarker(definition) {
   return marker;
 }
 
+function createAmygdalaGeometry() {
+  const geometry = new THREE.SphereGeometry(1, 36, 24);
+  const positions = geometry.getAttribute("position");
+  const point = new THREE.Vector3();
+
+  for (let index = 0; index < positions.count; index += 1) {
+    point.fromBufferAttribute(positions, index);
+    const axialDistance = Math.abs(point.z);
+    const poleTaper = 1 - 0.16 * axialDistance ** 1.6;
+    const anteriorFullness = THREE.MathUtils.lerp(0.9, 1.08, (point.z + 1) * 0.5);
+
+    // The amygdala is a compact, asymmetric almond-shaped nucleus: broader
+    // anteriorly and tapered posteriorly, rather than a generic sphere.
+    positions.setXYZ(
+      index,
+      point.x * 0.34 * poleTaper * anteriorFullness,
+      point.y * 0.23 * poleTaper,
+      point.z * 0.4,
+    );
+  }
+
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function createAmygdalaMarker(definition) {
+  const marker = new THREE.Group();
+  const hitTargets = [];
+  const markerScale = definition.markerScale || 1;
+
+  for (const [hemisphere, side] of [["left", -1], ["right", 1]]) {
+    const nucleus = new THREE.Mesh(
+      createAmygdalaGeometry(),
+      createDeepRegionMaterial("amygdala"),
+    );
+    nucleus.position.x = (
+      side * Math.abs(definition.center[0]) - definition.position[0]
+    ) / markerScale;
+    nucleus.rotation.set(0.12, side * 0.18, side * -0.08);
+    nucleus.userData = { region: "amygdala", hemisphere, isRegionMarker: true };
+    marker.add(nucleus);
+    hitTargets.push(nucleus);
+  }
+
+  marker.userData = {
+    region: "amygdala",
+    isDeepRegion: true,
+    bilateral: true,
+    markerScale: definition.markerScale,
+    weight: 0,
+    hitTargets,
+  };
+  return marker;
+}
+
+function createInsulaGeometry() {
+  const outline = new THREE.Shape();
+  outline.moveTo(-0.5, -0.25);
+  outline.bezierCurveTo(-0.56, 0.02, -0.48, 0.36, -0.28, 0.48);
+  outline.bezierCurveTo(-0.03, 0.59, 0.32, 0.5, 0.47, 0.26);
+  outline.bezierCurveTo(0.57, 0.07, 0.49, -0.27, 0.22, -0.42);
+  outline.bezierCurveTo(-0.02, -0.53, -0.38, -0.45, -0.5, -0.25);
+
+  const depth = 0.18;
+  const geometry = new THREE.ExtrudeGeometry(outline, {
+    depth,
+    steps: 1,
+    curveSegments: 12,
+    bevelEnabled: true,
+    bevelSegments: 4,
+    bevelSize: 0.075,
+    bevelThickness: 0.055,
+  });
+  geometry.translate(0, 0, -depth / 2);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function createInsulaRidge(points, material) {
+  const curve = new THREE.CatmullRomCurve3(
+    points.map(([x, y]) => new THREE.Vector3(x, y, 0.145)),
+    false,
+    "centripetal",
+  );
+  return new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 20, 0.018, 7, false),
+    material,
+  );
+}
+
+function createInsulaMarker(definition) {
+  const marker = new THREE.Group();
+  const hitTargets = [];
+  const markerScale = definition.markerScale || 1;
+
+  for (const [hemisphere, side] of [["left", -1], ["right", 1]]) {
+    const anatomy = new THREE.Group();
+    anatomy.name = `${hemisphere}-insula`;
+    anatomy.position.x = (
+      side * Math.abs(definition.center[0]) - definition.position[0]
+    ) / markerScale;
+    // The insula is a buried cortical plate on the lateral wall, not an oval
+    // nucleus. Turn the extruded fan outward in each hemisphere.
+    anatomy.rotation.set(-0.08, side * Math.PI / 2, side * -0.08);
+
+    const surface = new THREE.Group();
+    surface.scale.set(1.5, 0.9, 1);
+    anatomy.add(surface);
+
+    const plate = new THREE.Mesh(
+      createInsulaGeometry(),
+      createDeepRegionMaterial("insula"),
+    );
+    plate.userData = { region: "insula", hemisphere, isRegionMarker: true };
+    surface.add(plate);
+    hitTargets.push(plate);
+
+    // Shallow radiating ridges evoke the short and long insular gyri while
+    // keeping the silhouette readable through the translucent cerebral shell.
+    const ridgeMaterial = createDeepRegionMaterial("insula");
+    ridgeMaterial.color.offsetHSL(0, -0.08, 0.1);
+    ridgeMaterial.emissive.copy(ridgeMaterial.color);
+    ridgeMaterial.opacity = 0.82;
+    [
+      [[-0.36, 0.26], [-0.12, 0.18], [0.18, 0.12], [0.39, 0.18]],
+      [[-0.38, 0.04], [-0.13, 0.01], [0.16, -0.05], [0.4, -0.15]],
+      [[-0.26, 0.43], [-0.08, 0.24], [0.03, 0.02], [0.1, -0.32]],
+    ].forEach((points) => surface.add(createInsulaRidge(points, ridgeMaterial)));
+
+    marker.add(anatomy);
+  }
+
+  marker.userData = {
+    region: "insula",
+    isDeepRegion: true,
+    bilateral: true,
+    markerScale: definition.markerScale,
+    weight: 0,
+    hitTargets,
+  };
+  return marker;
+}
+
 function createMotorCortexMarker(definition) {
   const marker = new THREE.Group();
   const hitTarget = new THREE.Mesh(
@@ -388,8 +534,10 @@ function createMotorCortexMarker(definition) {
 
 function createRegionMarker(region, definition) {
   if (region === "hippocampus") return createHippocampusMarker(definition);
+  if (region === "amygdala") return createAmygdalaMarker(definition);
   if (region === "basalGanglia") return createBasalGangliaMarker(definition);
   if (region === "cerebellum") return createCerebellumMarker(definition);
+  if (region === "insula") return createInsulaMarker(definition);
   if (region === "motorCortex") return createMotorCortexMarker(definition);
   const marker = new THREE.Group();
   const shape = REGION_MARKER_SHAPES[region];

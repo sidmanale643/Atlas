@@ -24,6 +24,7 @@ import {
   getHippocampalLaterality,
   getRegionContributions,
 } from "./region-mapper.js";
+import { apiFetch } from "../../lib/api-transport";
 
 const MAX_LENGTH = 180;
 const USE_LEGACY_BRAIN =
@@ -77,8 +78,6 @@ const form = document.querySelector("#memoryForm");
 const input = document.querySelector("#memoryInput");
 const characterCount = document.querySelector("#characterCount");
 const memoryQuotaStatus = document.querySelector("#memoryQuota");
-const memoryQuotaDialog = document.querySelector("#memoryQuotaDialog");
-const memoryQuotaClose = document.querySelector("#memoryQuotaClose");
 const memoryCount = document.querySelector("#memoryCount");
 const memoryList = document.querySelector("#memoryList");
 const emptyState = document.querySelector("#emptyState");
@@ -171,7 +170,7 @@ form.addEventListener("submit", async (event) => {
   submitButton.textContent = "ENCODING\u2026";
 
   try {
-    const res = await fetch("/api/memories", {
+    const res = await apiFetch("/api/memories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, ingestionDate: new Date().toISOString() }),
@@ -219,8 +218,6 @@ form.addEventListener("submit", async (event) => {
   if (!memoryQuota?.reached) input.focus();
 });
 
-memoryQuotaClose.addEventListener("click", () => memoryQuotaDialog.close());
-
 function updateMemoryQuota(quota) {
   if (!quota) return;
   memoryQuota = quota;
@@ -230,8 +227,10 @@ function updateMemoryQuota(quota) {
 function syncMemoryQuotaUi() {
   const reached = Boolean(memoryQuota?.reached);
   const remaining = memoryQuota?.remaining ?? 10;
+  const limit = memoryQuota?.limit ?? 10;
+  const used = memoryQuota?.used ?? 0;
   memoryQuotaStatus.textContent = reached
-    ? "10 / 10 · limit reached"
+    ? `${used} / ${limit} · limit reached`
     : `${remaining} ${remaining === 1 ? "memory" : "memories"} available`;
   memoryQuotaStatus.dataset.reached = String(reached);
   input.disabled = reached;
@@ -240,16 +239,14 @@ function syncMemoryQuotaUi() {
 }
 
 function showMemoryQuotaDialog() {
-  if (typeof memoryQuotaDialog.showModal === "function") {
-    if (!memoryQuotaDialog.open) memoryQuotaDialog.showModal();
-  } else {
-    window.alert("You’ve recorded all 10 memories. This limit cannot be reset by deleting them.");
-  }
+  window.dispatchEvent(new CustomEvent("atlas:quota-reached", {
+    detail: memoryQuota,
+  }));
 }
 
 async function loadMemoryQuota() {
   try {
-    const response = await fetch("/api/memory-quota");
+    const response = await apiFetch("/api/memory-quota");
     if (response.ok) updateMemoryQuota(await response.json());
   } catch (error) {
     console.error("Failed to load memory quota:", error);
@@ -263,8 +260,8 @@ clearButton.addEventListener("click", async () => {
 
   try {
     await Promise.all([
-      fetch("/api/memories", { method: "DELETE" }),
-      fetch("/api/entities", { method: "DELETE" }),
+      apiFetch("/api/memories", { method: "DELETE" }),
+      apiFetch("/api/entities", { method: "DELETE" }),
     ]);
   } catch (err) {
     console.error("Failed to clear:", err);
@@ -279,6 +276,52 @@ clearButton.addEventListener("click", async () => {
   if (searchQuery.trim()) scheduleSemanticSearch({ immediate: true });
   render();
 });
+
+async function deleteMemory(memory, button) {
+  const shouldDelete = window.confirm(
+    `Permanently delete “${memory.summary || memory.text}”?`,
+  );
+  if (!shouldDelete) return;
+
+  button.disabled = true;
+  button.setAttribute("aria-label", "Deleting memory");
+
+  try {
+    const response = await apiFetch(
+      `/api/memories/${encodeURIComponent(memory.id)}`,
+      { method: "DELETE" },
+    );
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Delete failed (${response.status})`);
+    }
+
+    memories = memories.filter((item) => item.id !== memory.id);
+    entityGraphCache.clear();
+    relatedMemoryCache.clear();
+    resetRelatedMemoryState();
+
+    if (selectedMemoryId === memory.id) {
+      selectedMemoryId = null;
+      selectedRegion = null;
+      selectedRegionMemoryId = null;
+      hoveredRegion = null;
+      cameraFocus = null;
+    }
+    if (hoveredMemoryId === memory.id) setHoveredMemory(null);
+    resetEntityTraversal();
+
+    if (searchQuery.trim()) {
+      scheduleSemanticSearch({ immediate: true });
+    }
+    render();
+  } catch (error) {
+    console.error("Failed to delete memory:", error);
+    window.alert(error.message || "Could not delete this memory.");
+    button.disabled = false;
+    button.setAttribute("aria-label", "Delete memory");
+  }
+}
 
 clearSelectionButton.addEventListener("click", clearSelection);
 brainFullscreenButton.addEventListener("click", async () => {
@@ -533,7 +576,7 @@ async function runSemanticSearch(query) {
   searchRequestController = controller;
 
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/memories/search?q=${encodeURIComponent(
         query,
       )}&limit=100&scoreThreshold=${SEMANTIC_SCORE_THRESHOLD}`,
@@ -636,7 +679,7 @@ async function requestRelatedMemories(memoryId, { force = false } = {}) {
   const controller = new AbortController();
   relatedMemoryRequestController = controller;
   try {
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/memories/${encodeURIComponent(
         memoryId,
       )}/links?limit=${RELATED_MEMORY_LIMIT}&scoreThreshold=${
@@ -933,7 +976,7 @@ async function focusEntity(
   const controller = new AbortController();
   entityRequestController = controller;
   try {
-    const response = await fetch(`/api/entities/${id}/graph`, {
+    const response = await apiFetch(`/api/entities/${id}/graph`, {
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -1924,6 +1967,18 @@ function renderMemoryList() {
       : `TRACE ${String(filtered.length - index).padStart(2, "0")}`;
     card.querySelector("time").textContent = formatDate(memory.createdAt);
     card.querySelector(".memory-text").textContent = memory.text;
+    const deleteButton = card.querySelector(".memory-delete");
+    deleteButton.setAttribute(
+      "aria-label",
+      `Delete memory: ${memory.summary || memory.text}`,
+    );
+    deleteButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void deleteMemory(memory, deleteButton);
+    });
+    deleteButton.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+    });
     card.dataset.memoryId = memory.id;
     card.tabIndex = 0;
     card.setAttribute("role", "button");
@@ -1993,7 +2048,7 @@ function updateMemoryListEntityState() {
 
 async function loadMemories() {
   try {
-    const res = await fetch("/api/memories");
+    const res = await apiFetch("/api/memories");
     if (res.ok) {
       const data = await res.json();
       memories = data.map(normalizeServerMemory);
@@ -3542,3 +3597,12 @@ function renderBrainModel() {
 renderBrainModel();
 loadMemories();
 loadMemoryQuota();
+
+window.addEventListener("atlas:auth-claimed", async () => {
+  selectedMemoryId = null;
+  entityGraphCache.clear();
+  relatedMemoryCache.clear();
+  resetRelatedMemoryState();
+  resetEntityTraversal();
+  await Promise.all([loadMemories(), loadMemoryQuota()]);
+});

@@ -49,7 +49,8 @@ export const LEGACY_REGION_GEOMETRY = Object.freeze({
   }),
   amygdala: Object.freeze({
     kind: "deep",
-    center: Object.freeze([0.82, -0.78, 0.72]),
+    // Paired nuclei sit just anterior to the hippocampal heads.
+    center: Object.freeze([0.82, -0.78, 1.02]),
     radius: Object.freeze([0.5, 0.45, 0.6]),
     bilateral: true,
   }),

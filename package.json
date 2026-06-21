@@ -1,20 +1,26 @@
 {
   "name": "atlas-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Brain-inspired semantic memory system and MCP server",
   "author": "sidmanale",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sidmanale643/Atlas"
+    "url": "git+https://github.com/sidmanale643/Atlas.git"
   },
   "type": "module",
   "engines": {
     "node": ">=18"
   },
+  "files": [
+    "src/",
+    "public/",
+    "scripts/sync-memory-vectors.js",
+    ".env.example"
+  ],
   "bin": {
-    "atlas": "./src/cli.js",
-    "atlas-mcp": "./src/mcp-server.js"
+    "atlas": "src/cli.js",
+    "atlas-mcp": "src/mcp-server.js"
   },
   "scripts": {
     "start": "node src/server.js",
@@ -59,6 +65,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.28.0",
+    "supabase": "2.107.0",
     "three": "^0.177.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"

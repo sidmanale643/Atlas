@@ -6,6 +6,7 @@ import type {
   Memory,
   MemoryCatalogItem,
 } from "./types";
+import { apiFetch } from "./api-transport";
 
 /* A pending alias-merge suggestion surfaced in an entity's resolution review. */
 export type EntityResolutionSuggestion = {
@@ -21,7 +22,7 @@ export type EntityResolutionSuggestion = {
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const res = await apiFetch(url, init);
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
   if (!res.ok) {
@@ -59,6 +60,16 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     }),
+
+  updateMemorySummary: (id: string, summary: string) =>
+    request<{ ok: true }>(
+      `/api/memories/${encodeURIComponent(id)}/summary`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ summary }),
+      },
+    ),
 
   deleteMemory: (id: string) =>
     request<{ ok: true }>(`/api/memories/${encodeURIComponent(id)}`, { method: "DELETE" }),

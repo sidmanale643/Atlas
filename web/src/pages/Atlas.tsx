@@ -95,18 +95,17 @@ const SCAFFOLD = `
     </aside>
   </section>
 
-  <dialog class="memory-quota-dialog" id="memoryQuotaDialog" aria-labelledby="memoryQuotaTitle">
-    <div class="memory-quota-dialog__body">
-      <p class="memory-quota-dialog__eyebrow">Atlas capacity</p>
-      <h2 id="memoryQuotaTitle">You’ve recorded all 10 memories</h2>
-      <p>This limit is tied to your network and stays reached even if memories are deleted.</p>
-      <button class="record-button" id="memoryQuotaClose" type="button">Got it</button>
-    </div>
-  </dialog>
-
   <template id="memoryCardTemplate">
     <article class="memory-card">
-      <div class="memory-card-top"><span class="memory-number"></span><time></time></div>
+      <div class="memory-card-top">
+        <span class="memory-number"></span>
+        <time></time>
+        <button class="memory-delete" type="button" aria-label="Delete memory" title="Delete memory">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" />
+          </svg>
+        </button>
+      </div>
       <p class="memory-text"></p>
       <div class="memory-tags"></div>
     </article>
