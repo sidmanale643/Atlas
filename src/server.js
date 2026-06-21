@@ -4,7 +4,8 @@ import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 import { pathToFileURL } from "url";
 import { existsSync } from "fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { isIP } from "node:net";
 import { z } from "zod";
 import { compareMemories, decideMemoryWrite, extractAtomicMemories, extractMemory } from "./llm.js";
 import { model } from "./llm-config.js";
@@ -77,12 +78,15 @@ import {
   updateMemoryGraph,
   updateMemorySourceStatus,
   withTransaction,
+  claimIpMemoryQuota,
+  getIpMemoryQuota,
 } from "./db.js";
 
 const log = createLogger("server");
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "public");
 const PORT = process.env.PORT || 3001;
+const MEMORY_QUOTA_LIMIT = 10;
 const zSourceRevision = z.object({
   text: z.string().min(1).max(2000),
   author: z.string().trim().min(1).max(200).optional(),
@@ -145,6 +149,8 @@ const defaultDependencies = {
   getAnnotationStatus,
   getVectorIndexStatus,
   withTransaction,
+  claimIpMemoryQuota,
+  getIpMemoryQuota,
 };
 
 export function createAtlasApp(overrides = {}) {
@@ -181,10 +187,29 @@ export function createAtlasApp(overrides = {}) {
     next();
   });
 
+  app.get("/api/memory-quota", (req, res) => {
+    res.json(dependencies.getIpMemoryQuota(
+      hashClientIp(getClientIp(req)),
+      MEMORY_QUOTA_LIMIT,
+    ));
+  });
+
   app.post("/api/memories", async (req, res) => {
     const parsed = MemoryRequest.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.issues });
+    }
+
+    const quota = dependencies.claimIpMemoryQuota(
+      hashClientIp(getClientIp(req)),
+      MEMORY_QUOTA_LIMIT,
+    );
+    if (!quota.allowed) {
+      return res.status(429).json({
+        error: "You have reached the 10-memory limit for this network.",
+        code: "MEMORY_QUOTA_REACHED",
+        quota: withoutAllowed(quota),
+      });
     }
 
     const { text, ingestionDate } = parsed.data;
@@ -197,7 +222,7 @@ export function createAtlasApp(overrides = {}) {
         source: "ui",
       });
       log.info("source ingested", { sourceId: result.sourceId, count: result.memories.length });
-      res.status(201).json(result);
+      res.status(201).json({ ...result, quota: withoutAllowed(quota) });
     } catch (error) {
       log.error("ingestion failed", { sourceId: error.sourceId, error: error.message });
       res.status(502).json({
@@ -653,6 +678,43 @@ export function createAtlasApp(overrides = {}) {
   }
 
   return app;
+}
+
+function withoutAllowed({ allowed: _allowed, ...quota }) {
+  return quota;
+}
+
+function getClientIp(req) {
+  const candidates = [
+    req.headers["x-vercel-forwarded-for"],
+    req.headers["x-forwarded-for"],
+    req.headers["x-real-ip"],
+    req.socket?.remoteAddress,
+  ];
+  for (const candidate of candidates) {
+    const first = Array.isArray(candidate) ? candidate[0] : String(candidate || "").split(",")[0];
+    const normalized = normalizeIp(first);
+    if (normalized) return normalized;
+  }
+  return "unknown";
+}
+
+function normalizeIp(value) {
+  let candidate = String(value || "").trim().replace(/^"|"$/g, "");
+  if (candidate.startsWith("[") && candidate.includes("]")) {
+    candidate = candidate.slice(1, candidate.indexOf("]"));
+  }
+  const ipv4WithPort = candidate.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+  if (ipv4WithPort) candidate = ipv4WithPort[1];
+  if (candidate.startsWith("::ffff:") && isIP(candidate.slice(7)) === 4) {
+    candidate = candidate.slice(7);
+  }
+  return isIP(candidate) ? candidate.toLowerCase() : null;
+}
+
+function hashClientIp(ip) {
+  const salt = process.env.MEMORY_QUOTA_SALT || "neurogram-memory-quota-v1";
+  return createHash("sha256").update(`${salt}:${ip}`).digest("hex");
 }
 
 async function syncVectorIndex(operation, context) {
