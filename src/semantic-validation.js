@@ -5,6 +5,8 @@ export const SEMANTIC_VALIDATION_CODES = Object.freeze({
   EVIDENCE_OUT_OF_BOUNDS: "evidence_out_of_bounds",
   EVIDENCE_TEXT_MISMATCH: "evidence_text_mismatch",
   DURABILITY_REJECTED: "durability_rejected",
+  USER_FACING_INTERNAL_SUBJECT: "user_facing_internal_subject",
+  USER_FACING_IMPLEMENTATION_DATE: "user_facing_implementation_date",
   OCCURRED_AT_TEXT_MISSING: "occurred_at_text_missing",
   OCCURRED_AT_TEXT_MISMATCH: "occurred_at_text_mismatch",
   EVIDENCE_INDEX_OUT_OF_BOUNDS: "evidence_index_out_of_bounds",
@@ -200,10 +202,33 @@ function validateAtom(sourceText, memory, atomIndex, issues, boundaryAudit) {
     );
   }
 
+  validateUserFacingProse(memory, atomPath, issues);
   validateOccurredAt(sourceText, memory.occurredAt, atomPath, issues);
   validateEntities(memory, atomPath, issues);
   validateRelationships(memory, atomPath, issues);
   if (boundaryAudit) auditBoundaries(sourceText, memory, atomPath, issues);
+}
+
+function validateUserFacingProse(memory, atomPath, issues) {
+  for (const field of ["text", "summary"]) {
+    const value = memory[field];
+    if (/\b(?:self|the speaker|the user)\b/i.test(value)) {
+      addIssue(
+        issues,
+        SEMANTIC_VALIDATION_CODES.USER_FACING_INTERNAL_SUBJECT,
+        [...atomPath, field],
+        `${field} must use first-person language; self is reserved for relationships`,
+      );
+    }
+    if (/\b(?:the )?(?:ingestion|source|current|today'?s) date\b/i.test(value)) {
+      addIssue(
+        issues,
+        SEMANTIC_VALIDATION_CODES.USER_FACING_IMPLEMENTATION_DATE,
+        [...atomPath, field],
+        `${field} must use the source time phrase or resolved calendar date`,
+      );
+    }
+  }
 }
 
 function validateOccurredAt(sourceText, occurredAt, atomPath, issues) {
