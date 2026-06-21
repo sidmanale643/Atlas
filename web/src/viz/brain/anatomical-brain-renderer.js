@@ -36,6 +36,13 @@ const NEUTRAL_MATERIAL = Object.freeze({
   opacity: 1,
 });
 const NEUTRAL_COLOR = new THREE.Color(NEUTRAL_MATERIAL.color);
+const REGION_FILL_OPACITY = Object.freeze({
+  inactive: 0.08,
+  active: 0.22,
+  selected: 0.24,
+  hovered: 0.34,
+});
+const SELECTED_EDGE_GLOW = 0.8;
 
 // The per-region highlight palette is the canonical REGION_COLORS map from
 // region-anchors.js (shared with node/connection placement) so a region's mesh
@@ -454,7 +461,9 @@ export class AnatomicalBrainRenderer {
 
     for (const [region, hemispheres] of this.regions) {
       const activation = this.activations.get(region) || { weight: 0 };
-      const isFocused = region === focusedRegion;
+      const isSelected = region === this.selectedRegion;
+      const isHovered = region === this.hoveredRegion;
+      const isFocused = isSelected || isHovered;
       const deep = DEEP_REGIONS.has(region);
       const hemisphereValues = activation.hemispheres;
 
@@ -471,6 +480,8 @@ export class AnatomicalBrainRenderer {
             active,
             deep,
             isFocused,
+            isHovered,
+            isSelected,
             anyFocus,
             displayWeight,
             region,
@@ -492,6 +503,8 @@ export class AnatomicalBrainRenderer {
     active,
     deep,
     isFocused,
+    isHovered,
+    isSelected,
     anyFocus,
     displayWeight,
     region,
@@ -509,19 +522,24 @@ export class AnatomicalBrainRenderer {
     // the silhouette into overlapping color patches.
     mesh.renderOrder = isFocused ? 5 : active ? 4 : deep ? 2 : 1;
 
-    // Keep every active surface in the same slate tissue family. Weight changes
-    // the amount of colored light, while focus is the only state allowed to
-    // reveal most of the region's identity hue.
-    const targetColor = active
-      ? new THREE.Color().lerpColors(
-          NEUTRAL_COLOR,
-          base,
-          0.12 + displayWeight * 0.18,
-        )
-      : NEUTRAL_COLOR.clone();
-    if (isFocused) {
-      targetColor.lerp(bright, 0.48);
-    }
+    // Composite a restrained color wash into the neutral tissue instead of
+    // replacing the brain surface with opaque region-colored material.
+    const activeFill = THREE.MathUtils.lerp(
+      REGION_FILL_OPACITY.inactive,
+      REGION_FILL_OPACITY.active,
+      displayWeight,
+    );
+    const fillOpacity = isHovered
+      ? REGION_FILL_OPACITY.hovered
+      : isSelected
+        ? REGION_FILL_OPACITY.selected
+        : active
+          ? activeFill
+          : REGION_FILL_OPACITY.inactive;
+    const targetColor = NEUTRAL_COLOR.clone().lerp(
+      isFocused ? bright : base,
+      fillOpacity,
+    );
     material.color.copy(targetColor);
 
     // Emissive encodes activation primarily as brightness (not geometry size).
@@ -530,9 +548,11 @@ export class AnatomicalBrainRenderer {
       material.metalness = 0;
       setMaterialSide(material, THREE.FrontSide);
       material.emissive.copy(isFocused ? bright : base);
-      material.emissiveIntensity = isFocused
-        ? 0.62
-        : 0.06 + displayWeight * 0.2;
+      material.emissiveIntensity = isHovered
+        ? REGION_FILL_OPACITY.hovered
+        : isSelected
+          ? REGION_FILL_OPACITY.selected
+          : activeFill;
     } else {
       material.roughness = NEUTRAL_MATERIAL.roughness;
       material.metalness = NEUTRAL_MATERIAL.metalness;
@@ -547,7 +567,7 @@ export class AnatomicalBrainRenderer {
     if (deep && !active && !isFocused) {
       material.opacity = 0;
     } else if (deep && (active || isFocused)) {
-      material.opacity = isFocused ? 0.82 : 0.58 + displayWeight * 0.14;
+      material.opacity = fillOpacity;
     } else {
       material.opacity = NEUTRAL_MATERIAL.opacity;
     }
@@ -559,7 +579,9 @@ export class AnatomicalBrainRenderer {
     // A crisp neutral edge lift remains on every surface for hard contrast.
     if (isFocused) {
       uniforms.uRimColor.value.copy(bright);
-      uniforms.uRimIntensity.value = 0.72;
+      uniforms.uRimIntensity.value = isSelected
+        ? SELECTED_EDGE_GLOW
+        : 0.62;
       uniforms.uEdgeBoost.value = 1.18;
     } else if (active) {
       uniforms.uRimColor.value.copy(base);

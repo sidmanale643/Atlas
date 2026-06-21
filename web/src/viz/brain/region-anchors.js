@@ -3,15 +3,15 @@ export const REGION_COLORS = Object.freeze({
   // deliberately pastel: the renderer tints neutral tissue with them instead
   // of painting each active region as a fully saturated block.
   hippocampus: "#ffd38a",
-  prefrontal: "#8edfff",
+  prefrontal: "#FF7A90",
   amygdala: "#ff8fa8",
-  temporalCortex: "#b9a7ff",
+  temporalCortex: "#A78BFA",
   parietalCortex: "#7ee8d3",
-  basalGanglia: "#978cff",
-  cerebellum: "#9ce4ba",
-  motorCortex: "#ffad8a",
+  basalGanglia: "#8B7CFF",
+  cerebellum: "#7EE0B8",
+  motorCortex: "#F6B26B",
   insula: "#e99fd1",
-  associationCortex: "#d9e4e8",
+  associationCortex: "#5B7CFF",
   entorhinal: "#80d8d0",
 });
 

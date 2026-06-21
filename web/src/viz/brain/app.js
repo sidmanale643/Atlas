@@ -2094,8 +2094,8 @@ function updateActivationConnections() {
     const opacity = !visible
       ? 0
       : focused
-        ? THREE.MathUtils.lerp(0.62, 0.96, weight)
-        : THREE.MathUtils.lerp(0.2, 0.52, weight);
+        ? THREE.MathUtils.lerp(0.72, 0.85, weight)
+        : THREE.MathUtils.lerp(0.6, 0.72, weight);
 
     tubeMaterial.opacity = Math.min(opacity, 1);
     glowMaterial.opacity = Math.min(opacity * (focused ? 0.38 : 0.24), 1);
@@ -2411,8 +2411,9 @@ function createRelatedMemoryLink(startPosition, endPosition, memoryId, score) {
   const material = new THREE.MeshBasicMaterial({
     color: RELATED_LINK_COLOR,
     transparent: true,
-    opacity: THREE.MathUtils.lerp(0.22, 0.62, strength),
+    opacity: THREE.MathUtils.lerp(0.6, 0.85, strength),
     blending: THREE.AdditiveBlending,
+    depthTest: false,
     depthWrite: false,
   });
   const link = new THREE.Mesh(
@@ -2420,7 +2421,7 @@ function createRelatedMemoryLink(startPosition, endPosition, memoryId, score) {
     material,
   );
   link.name = `related-memory-link:${selectedMemoryId}:${memoryId}`;
-  link.renderOrder = 2;
+  link.renderOrder = 9;
   link.userData = {
     memoryId,
     score: strength,
