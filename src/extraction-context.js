@@ -3,13 +3,14 @@ export const EXTRACTION_CONTEXT_THRESHOLD = 0.7;
 
 export async function retrieveExtractionContext(
   text,
-  { searchMemoryVectors, getEntitiesForMemory },
+  { searchMemoryVectors, getEntitiesForMemory, getMemory, ownerHash },
 ) {
   const hits = await searchMemoryVectors(text, {
     limit: EXTRACTION_CONTEXT_LIMIT,
   });
 
   const entities = hits
+    .filter(({ id }) => !ownerHash || getMemory?.(id)?.owner_hash === ownerHash)
     .filter(({ score }) => Number(score) >= EXTRACTION_CONTEXT_THRESHOLD)
     .slice(0, EXTRACTION_CONTEXT_LIMIT)
     .flatMap(({ id }) => getEntitiesForMemory?.(id) || [])

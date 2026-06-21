@@ -60,6 +60,7 @@ import {
   deleteAllMemories,
   deleteAllEntities,
   deleteMemory,
+  deleteMemoriesByOwner,
   claimAnnotationJob,
   completeAnnotationJob,
   createMemorySource,
@@ -109,6 +110,7 @@ const defaultDependencies = {
   deleteAllEntities,
   deleteMemoryVector,
   deleteMemory,
+  deleteMemoriesByOwner,
   extractAtomicMemories,
   extractMemory,
   findEntities,
@@ -200,8 +202,9 @@ export function createAtlasApp(overrides = {}) {
       return res.status(400).json({ error: parsed.error.issues });
     }
 
+    const ownerHash = requestOwnerHash(req);
     const quota = dependencies.claimIpMemoryQuota(
-      hashClientIp(getClientIp(req)),
+      ownerHash,
       MEMORY_QUOTA_LIMIT,
     );
     if (!quota.allowed) {
@@ -220,6 +223,7 @@ export function createAtlasApp(overrides = {}) {
         text,
         ingestionDate: date,
         source: "ui",
+        metadata: { ownerHash },
       });
       log.info("source ingested", { sourceId: result.sourceId, count: result.memories.length });
       res.status(201).json({ ...result, quota: withoutAllowed(quota) });
@@ -238,7 +242,9 @@ export function createAtlasApp(overrides = {}) {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
     const source = req.query.source || undefined;
-    const rows = dependencies.getMemories({ limit, offset, source });
+    const rows = dependencies.getMemories({
+      limit, offset, source, ownerHash: requestOwnerHash(req),
+    });
     res.json(rows.map((row) => serializeMemory(row, dependencies)));
   });
 
@@ -246,13 +252,17 @@ export function createAtlasApp(overrides = {}) {
     const source = dependencies.getMemorySource(req.params.id, {
       includeRevisions: true,
     });
-    if (!source) return res.status(404).json({ error: "Source not found" });
+    if (!source || source.metadata_json?.ownerHash !== requestOwnerHash(req)) {
+      return res.status(404).json({ error: "Source not found" });
+    }
     res.json({ ...source, links: dependencies.getSourceMemoryLinks(source.id) });
   });
 
   app.post("/api/sources/:id/revisions", async (req, res) => {
     const source = dependencies.getMemorySource(req.params.id);
-    if (!source) return res.status(404).json({ error: "Source not found" });
+    if (!source || source.metadata_json?.ownerHash !== requestOwnerHash(req)) {
+      return res.status(404).json({ error: "Source not found" });
+    }
     const parsed = zSourceRevision.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.issues });
     const revision = dependencies.createSourceRevision({
@@ -287,7 +297,10 @@ export function createAtlasApp(overrides = {}) {
       },
     });
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
-    res.json(dependencies.getMemoryCatalog(parsed.value));
+    res.json(dependencies.getMemoryCatalog({
+      ...parsed.value,
+      ownerHash: requestOwnerHash(req),
+    }));
   });
 
   app.get("/api/catalog/entities", (req, res) => {
@@ -306,7 +319,10 @@ export function createAtlasApp(overrides = {}) {
       },
     });
     if (!parsed.ok) return res.status(400).json({ error: parsed.error });
-    res.json(dependencies.getEntityCatalog(parsed.value));
+    res.json(dependencies.getEntityCatalog({
+      ...parsed.value,
+      ownerHash: requestOwnerHash(req),
+    }));
   });
 
   app.get("/api/memories/search", async (req, res) => {
@@ -326,22 +342,26 @@ export function createAtlasApp(overrides = {}) {
     }
 
     try {
+      const ownerHash = requestOwnerHash(req);
       const hits = await hybridSearchMemories(query, {
-        limit,
+        limit: Math.max(limit * 10, 100),
         scoreThreshold,
         strategy,
-        searchMemoriesFts,
+        searchMemoriesFts: (value, options) => searchMemoriesFts(value, {
+          ...options,
+          ownerHash,
+        }),
       });
       const hitIds = hits.map(({ id }) => id);
       const memoriesById = new Map(
-        dependencies.getMemoriesByIds(hitIds).map((m) => [m.id, m]),
+        dependencies.getMemoriesByIds(hitIds, { ownerHash }).map((m) => [m.id, m]),
       );
       const memories = hits.flatMap(({ id, score }) => {
         const memory = memoriesById.get(id);
         return memory
           ? [{ ...serializeMemory(memory, dependencies), rrfScore: score }]
           : [];
-      });
+      }).slice(0, limit);
       res.json({ query, strategy, memories });
     } catch (error) {
       log.error("search failed", { error: error.message });
@@ -353,7 +373,7 @@ export function createAtlasApp(overrides = {}) {
   });
 
   app.get("/api/memories/:id", (req, res) => {
-    const memory = dependencies.getMemory(req.params.id);
+    const memory = ownedMemory(req, req.params.id, dependencies);
     if (!memory) return res.status(404).json({ error: "Memory not found" });
 
     res.json(
@@ -377,13 +397,19 @@ export function createAtlasApp(overrides = {}) {
       return res.status(400).json({ error: scoreThreshold.error });
     }
 
+    const ownerHash = requestOwnerHash(req);
+    if (!dependencies.getMemory(req.params.id, { ownerHash })) {
+      return res.status(404).json({ error: "Memory not found" });
+    }
     const result = await deriveRelatedMemories(
       req.params.id,
       {
-        getMemory: dependencies.getMemory,
+        getMemory: (id) => dependencies.getMemory(id, { ownerHash }),
         getStructuralMemoryLinks: dependencies.getStructuralMemoryLinks,
         searchMemoryVectors: dependencies.searchMemoryVectors,
-        searchMemoriesFts,
+        searchMemoriesFts: (value, options) => searchMemoriesFts(value, {
+          ...options, ownerHash,
+        }),
         serializeMemory: (memory) =>
           serializeMemory(memory, dependencies, {
             includeRelationships: true,
@@ -405,8 +431,9 @@ export function createAtlasApp(overrides = {}) {
     }
 
     const { leftMemoryId, rightMemoryId, regenerate } = parsed.data;
-    const leftMemory = dependencies.getMemory(leftMemoryId);
-    const rightMemory = dependencies.getMemory(rightMemoryId);
+    const ownerHash = requestOwnerHash(req);
+    const leftMemory = dependencies.getMemory(leftMemoryId, { ownerHash });
+    const rightMemory = dependencies.getMemory(rightMemoryId, { ownerHash });
     if (!leftMemory || !rightMemory) {
       return res.status(404).json({
         error: "Memory not found",
@@ -494,18 +521,18 @@ export function createAtlasApp(overrides = {}) {
     }
   });
 
-  app.delete("/api/memories", async (_req, res) => {
-    dependencies.deleteAllMemories();
-    await syncVectorIndex(
-      () => dependencies.deleteAllMemoryVectors(),
-      { action: "delete-all" },
-    );
-    log.info("all memories deleted");
+  app.delete("/api/memories", async (req, res) => {
+    const ids = dependencies.deleteMemoriesByOwner(requestOwnerHash(req));
+    await Promise.all(ids.map((id) => syncVectorIndex(
+      () => dependencies.deleteMemoryVector(id),
+      { action: "delete", id },
+    )));
+    log.info("user memories deleted", { count: ids.length });
     res.json({ ok: true });
   });
 
   app.delete("/api/memories/:id", async (req, res) => {
-    const memory = dependencies.getMemory(req.params.id);
+    const memory = ownedMemory(req, req.params.id, dependencies);
     if (!memory) return res.status(404).json({ error: "Memory not found" });
     dependencies.deleteMemory(req.params.id);
     await syncVectorIndex(
@@ -522,8 +549,10 @@ export function createAtlasApp(overrides = {}) {
       return res.status(400).json({ error: parsed.error.issues });
     }
 
+    const existing = ownedMemory(req, req.params.id, dependencies);
+    if (!existing) return res.status(404).json({ error: "Memory not found" });
     dependencies.updateMemorySummary(req.params.id, parsed.data.summary);
-    const memory = dependencies.getMemory(req.params.id);
+    const memory = ownedMemory(req, req.params.id, dependencies);
     if (memory) {
       await syncVectorIndex(
         () => dependencies.indexMemoryVector(memory),
@@ -537,18 +566,22 @@ export function createAtlasApp(overrides = {}) {
   app.get("/api/entities", (req, res) => {
     const q = req.query.q;
     if (!q) return res.status(400).json({ error: "q query param required" });
-    res.json(dependencies.findEntities(q));
+    res.json(dependencies.getEntityCatalog({
+      q: String(q), limit: 100, ownerHash: requestOwnerHash(req),
+    }).items);
   });
 
   app.delete("/api/entities", async (_req, res) => {
-    dependencies.deleteAllEntities();
-    log.info("all entities deleted");
     res.json({ ok: true });
   });
 
-  app.get("/api/graph", (_req, res) => {
+  app.get("/api/graph", (req, res) => {
     try {
-      res.json(dependencies.getGraphData());
+      const ownedIds = new Set(dependencies.getMemories({
+        ownerHash: requestOwnerHash(req),
+        limit: 100,
+      }).map(({ id }) => id));
+      res.json(scopeGraphData(dependencies.getGraphData(), ownedIds));
     } catch (err) {
       console.error("Graph data error:", err);
       res.status(500).json({ error: "Failed to load graph data" });
@@ -562,27 +595,27 @@ export function createAtlasApp(overrides = {}) {
       : null;
     if (!entity) return res.status(404).json({ error: "Entity not found" });
 
+    const ownerHash = requestOwnerHash(req);
     const memories = dependencies
       .getMemoriesForEntity(entityId)
+      .filter((memory) => memory.owner_hash === ownerHash)
       .map((memory) => serializeMemory(memory, dependencies));
+    if (!memories.length) return res.status(404).json({ error: "Entity not found" });
+    const ownedMemoryIds = new Set(memories.map(({ id }) => id));
     const relationships = dependencies
       .getRelationshipsForEntity(entityId)
+      .filter((relationship) => ownedMemoryIds.has(relationship.memory_id))
       .map(serializeRelationship);
-    const aliases = dependencies.getEntityAliases(entityId);
-    const suggestions = dependencies
-      .getEntityResolutionSuggestions({ status: "pending" })
-      .filter(
-        (suggestion) =>
-          Number(suggestion.source_entity_id) === entityId
-          || Number(suggestion.target_entity_id) === entityId,
-      );
+    const aliases = [];
+    const suggestions = [];
     res.json({ entity, aliases, memories, relationships, suggestions });
   });
 
   app.get("/api/entities/:id/memories", (req, res) => {
+    const ownerHash = requestOwnerHash(req);
     const memories = dependencies.getMemoriesForEntity(
       Number.parseInt(req.params.id, 10),
-    );
+    ).filter((memory) => memory.owner_hash === ownerHash);
     res.json(memories);
   });
 
@@ -591,31 +624,11 @@ export function createAtlasApp(overrides = {}) {
     if (!["pending", "merged", "rejected"].includes(status)) {
       return res.status(400).json({ error: `Invalid status: ${status}` });
     }
-    res.json({
-      suggestions: dependencies.getEntityResolutionSuggestions({ status }),
-    });
+    res.json({ suggestions: [] });
   });
 
-  app.patch("/api/entity-resolution/suggestions/:id", (req, res) => {
-    const suggestionId = Number(req.params.id);
-    const decision = req.body?.decision;
-    if (!Number.isSafeInteger(suggestionId) || suggestionId <= 0) {
-      return res.status(400).json({ error: "Invalid suggestion ID" });
-    }
-    if (!["merge", "reject"].includes(decision)) {
-      return res.status(400).json({
-        error: "decision must be merge or reject",
-      });
-    }
-
-    const result = dependencies.resolveEntityResolutionSuggestion(
-      suggestionId,
-      decision,
-    );
-    if (!result) {
-      return res.status(404).json({ error: "Suggestion not found" });
-    }
-    res.json(result);
+  app.patch("/api/entity-resolution/suggestions/:id", (_req, res) => {
+    res.status(404).json({ error: "Suggestion not found" });
   });
 
   app.post("/api/extract", async (req, res) => {
@@ -627,7 +640,10 @@ export function createAtlasApp(overrides = {}) {
     const { text, ingestionDate } = parsed.data;
 
     try {
-      const context = await retrieveExtractionContext(text, dependencies)
+      const context = await retrieveExtractionContext(text, {
+        ...dependencies,
+        ownerHash: requestOwnerHash(req),
+      })
         .catch(() => ({ entities: [] }));
       const extraction = await dependencies.extractAtomicMemories(
         text,
@@ -715,6 +731,28 @@ function normalizeIp(value) {
 function hashClientIp(ip) {
   const salt = process.env.MEMORY_QUOTA_SALT || "neurogram-memory-quota-v1";
   return createHash("sha256").update(`${salt}:${ip}`).digest("hex");
+}
+
+function requestOwnerHash(req) {
+  return hashClientIp(getClientIp(req));
+}
+
+function ownedMemory(req, memoryId, dependencies) {
+  return dependencies.getMemory(memoryId, { ownerHash: requestOwnerHash(req) });
+}
+
+function scopeGraphData(graph, ownedMemoryIds) {
+  const edges = (graph.edges || []).filter((edge) =>
+    edge.type === "memory-entity"
+      ? ownedMemoryIds.has(edge.source)
+      : edge.type === "relationship" && ownedMemoryIds.has(edge.memoryId));
+  const ownedEntityIds = new Set(edges.flatMap((edge) => [edge.source, edge.target])
+    .filter((id) => String(id).startsWith("entity_")));
+  const nodes = (graph.nodes || []).filter((node) =>
+    node.type === "memory"
+      ? ownedMemoryIds.has(node.id)
+      : ownedEntityIds.has(node.id));
+  return { nodes, edges };
 }
 
 async function syncVectorIndex(operation, context) {
