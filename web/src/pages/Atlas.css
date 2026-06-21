@@ -99,6 +99,35 @@
   color: var(--green-mid);
   font-variant-numeric: tabular-nums;
 }
+.composer-meta #memoryQuota[data-reached="true"] { color: #ff9b8c; }
+
+.memory-quota-dialog {
+  width: min(430px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--green-mid);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65), var(--glow-soft);
+}
+.memory-quota-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(3px);
+}
+.memory-quota-dialog__body { padding: 28px; }
+.memory-quota-dialog__eyebrow {
+  margin: 0 0 10px;
+  color: var(--green-mid);
+  font: 11px var(--font-mono);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.memory-quota-dialog h2 { margin: 0 0 12px; font-size: 24px; }
+.memory-quota-dialog p:not(.memory-quota-dialog__eyebrow) {
+  margin: 0 0 22px;
+  color: var(--muted);
+  line-height: 1.6;
+}
 
 /* primary action — solid phosphor key */
 .record-button {

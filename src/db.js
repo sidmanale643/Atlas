@@ -271,6 +271,14 @@ function initSchema() {
       UNIQUE(source_id)
     );
 
+    CREATE TABLE IF NOT EXISTS memory_ip_quotas (
+      ip_hash TEXT PRIMARY KEY,
+      submission_count INTEGER NOT NULL DEFAULT 0 CHECK (submission_count >= 0),
+      locked_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_extractions_memory ON memory_extractions(memory_id);
     CREATE INDEX IF NOT EXISTS idx_extractions_memory_latest
       ON memory_extractions(memory_id, created_at DESC, id DESC);
@@ -467,6 +475,47 @@ function migrateAnnotationJobs() {
 
 export function withTransaction(callback) {
   return getDb().transaction(callback)();
+}
+
+export function getIpMemoryQuota(ipHash, limit = 10) {
+  const row = getDb().prepare(`
+    SELECT submission_count FROM memory_ip_quotas WHERE ip_hash = ?
+  `).get(ipHash);
+  return formatIpMemoryQuota(row?.submission_count || 0, limit);
+}
+
+export function claimIpMemoryQuota(ipHash, limit = 10) {
+  const database = getDb();
+  return database.transaction(() => {
+    const now = new Date().toISOString();
+    database.prepare(`
+      INSERT OR IGNORE INTO memory_ip_quotas (
+        ip_hash, submission_count, created_at, updated_at
+      ) VALUES (?, 0, ?, ?)
+    `).run(ipHash, now, now);
+    const result = database.prepare(`
+      UPDATE memory_ip_quotas
+      SET submission_count = submission_count + 1,
+          locked_at = CASE
+            WHEN submission_count + 1 >= ? THEN COALESCE(locked_at, ?)
+            ELSE locked_at
+          END,
+          updated_at = ?
+      WHERE ip_hash = ? AND submission_count < ?
+    `).run(limit, now, now, ipHash, limit);
+    const quota = getIpMemoryQuota(ipHash, limit);
+    return { allowed: result.changes === 1, ...quota };
+  })();
+}
+
+function formatIpMemoryQuota(used, limit) {
+  const normalizedUsed = Math.max(0, Number(used) || 0);
+  return {
+    limit,
+    used: normalizedUsed,
+    remaining: Math.max(0, limit - normalizedUsed),
+    reached: normalizedUsed >= limit,
+  };
 }
 
 // --- Immutable sources and durable work queues ---

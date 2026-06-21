@@ -76,6 +76,9 @@ function getRegionColor(region) {
 const form = document.querySelector("#memoryForm");
 const input = document.querySelector("#memoryInput");
 const characterCount = document.querySelector("#characterCount");
+const memoryQuotaStatus = document.querySelector("#memoryQuota");
+const memoryQuotaDialog = document.querySelector("#memoryQuotaDialog");
+const memoryQuotaClose = document.querySelector("#memoryQuotaClose");
 const memoryCount = document.querySelector("#memoryCount");
 const memoryList = document.querySelector("#memoryList");
 const emptyState = document.querySelector("#emptyState");
@@ -147,6 +150,7 @@ const entityGraphCache = new Map();
 const relatedMemoryCache = new Map();
 let relatedMemoryRequestController = null;
 let relatedMemoryState = createEmptyRelatedMemoryState();
+let memoryQuota = null;
 
 input.maxLength = MAX_LENGTH;
 input.addEventListener("input", () => {
@@ -157,6 +161,10 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = input.value.trim();
   if (!text || extracting) return;
+  if (memoryQuota?.reached) {
+    showMemoryQuotaDialog();
+    return;
+  }
 
   extracting = true;
   submitButton.disabled = true;
@@ -169,38 +177,84 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify({ text, ingestionDate: new Date().toISOString() }),
     });
 
+    const result = await res.json();
     if (res.ok) {
-      const serverMemory = await res.json();
-      const memory = normalizeServerMemory(serverMemory);
-      memories.unshift(memory);
+      updateMemoryQuota(result.quota);
+      const addedMemories = (result.memories || [])
+        .map((outcome) => outcome.memory)
+        .filter(Boolean)
+        .map(normalizeServerMemory);
+      memories.unshift(...addedMemories);
       resetEntityTraversal();
-      selectedMemoryId = memory.id;
+      selectedMemoryId = addedMemories[0]?.id || selectedMemoryId;
       entityGraphCache.clear();
       relatedMemoryCache.clear();
       resetRelatedMemoryState();
-      navigationHistory = pushNavigation(navigationHistory, {
-        type: "memory",
-        id: memory.id,
-        label: getMemoryNavigationLabel(memory),
-      });
+      if (addedMemories[0]) {
+        navigationHistory = pushNavigation(navigationHistory, {
+          type: "memory",
+          id: addedMemories[0].id,
+          label: getMemoryNavigationLabel(addedMemories[0]),
+        });
+      }
       if (searchQuery.trim()) scheduleSemanticSearch({ immediate: true });
       render();
+      form.reset();
+      characterCount.textContent = `0 / ${MAX_LENGTH}`;
+      if (memoryQuota?.reached) showMemoryQuotaDialog();
     } else {
-      const err = await res.json();
-      console.error("Extraction failed:", err.error);
+      if (res.status === 429 && result.code === "MEMORY_QUOTA_REACHED") {
+        updateMemoryQuota(result.quota);
+        showMemoryQuotaDialog();
+      } else {
+        console.error("Extraction failed:", result.error);
+      }
     }
   } catch (err) {
     console.error("Network error:", err);
   }
 
   extracting = false;
-  submitButton.disabled = false;
-  submitButton.textContent = "RECORD";
-
-  form.reset();
-  characterCount.textContent = `0 / ${MAX_LENGTH}`;
-  input.focus();
+  syncMemoryQuotaUi();
+  if (!memoryQuota?.reached) input.focus();
 });
+
+memoryQuotaClose.addEventListener("click", () => memoryQuotaDialog.close());
+
+function updateMemoryQuota(quota) {
+  if (!quota) return;
+  memoryQuota = quota;
+  syncMemoryQuotaUi();
+}
+
+function syncMemoryQuotaUi() {
+  const reached = Boolean(memoryQuota?.reached);
+  const remaining = memoryQuota?.remaining ?? 10;
+  memoryQuotaStatus.textContent = reached
+    ? "10 / 10 · limit reached"
+    : `${remaining} ${remaining === 1 ? "memory" : "memories"} available`;
+  memoryQuotaStatus.dataset.reached = String(reached);
+  input.disabled = reached;
+  submitButton.disabled = extracting || reached;
+  submitButton.textContent = reached ? "LIMIT REACHED" : "RECORD";
+}
+
+function showMemoryQuotaDialog() {
+  if (typeof memoryQuotaDialog.showModal === "function") {
+    if (!memoryQuotaDialog.open) memoryQuotaDialog.showModal();
+  } else {
+    window.alert("You’ve recorded all 10 memories. This limit cannot be reset by deleting them.");
+  }
+}
+
+async function loadMemoryQuota() {
+  try {
+    const response = await fetch("/api/memory-quota");
+    if (response.ok) updateMemoryQuota(await response.json());
+  } catch (error) {
+    console.error("Failed to load memory quota:", error);
+  }
+}
 
 clearButton.addEventListener("click", async () => {
   if (!memories.length) return;
@@ -3487,3 +3541,4 @@ function renderBrainModel() {
 
 renderBrainModel();
 loadMemories();
+loadMemoryQuota();

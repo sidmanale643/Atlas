@@ -84,7 +84,7 @@ const SCAFFOLD = `
           <textarea id="memoryInput" rows="5"
             placeholder="I went to a cafe with Maya yesterday..." required></textarea>
           <div class="composer-meta">
-            <span>Natural language</span>
+            <span id="memoryQuota" role="status" aria-live="polite">10 memories available</span>
             <span id="characterCount">0 / 180</span>
           </div>
           <button class="record-button" type="submit">
@@ -94,6 +94,15 @@ const SCAFFOLD = `
       </section>
     </aside>
   </section>
+
+  <dialog class="memory-quota-dialog" id="memoryQuotaDialog" aria-labelledby="memoryQuotaTitle">
+    <div class="memory-quota-dialog__body">
+      <p class="memory-quota-dialog__eyebrow">Atlas capacity</p>
+      <h2 id="memoryQuotaTitle">You’ve recorded all 10 memories</h2>
+      <p>This limit is tied to your network and stays reached even if memories are deleted.</p>
+      <button class="record-button" id="memoryQuotaClose" type="button">Got it</button>
+    </div>
+  </dialog>
 
   <template id="memoryCardTemplate">
     <article class="memory-card">
