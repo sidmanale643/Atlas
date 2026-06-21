@@ -20,6 +20,10 @@ import { applyLegacyShell } from "./shell.js";
 const DRAG_THRESHOLD = 5;
 const MEMORY_COLOR = "#f4d8b4";
 const MEMORY_SURFACE_INSET_RATIO = 0.55;
+const LEGACY_BRAIN_URL = new URL(
+  "../../../../public/assets/brain.obj",
+  import.meta.url,
+).href;
 
 function disposeObject(object) {
   object.traverse((child) => {
@@ -356,7 +360,7 @@ export function renderLegacyBrain({
   }
 
   new OBJLoader().load(
-    "/assets/brain.obj",
+    LEGACY_BRAIN_URL,
     (loaded) => {
       if (disposed) return;
       model = loaded;
