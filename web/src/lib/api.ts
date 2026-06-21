@@ -60,6 +60,16 @@ export const api = {
       body: JSON.stringify({ text }),
     }),
 
+  updateMemorySummary: (id: string, summary: string) =>
+    request<{ ok: true }>(
+      `/api/memories/${encodeURIComponent(id)}/summary`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ summary }),
+      },
+    ),
+
   deleteMemory: (id: string) =>
     request<{ ok: true }>(`/api/memories/${encodeURIComponent(id)}`, { method: "DELETE" }),
 

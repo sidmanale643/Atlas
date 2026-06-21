@@ -230,6 +230,13 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
   const [relatedMemories, setRelatedMemories] = useState<
     Record<string, { loading?: boolean; links?: RelatedMemoryLink[]; error?: string }>
   >({});
+  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+  const [summaryDraft, setSummaryDraft] = useState("");
+  const [memoryAction, setMemoryAction] = useState<{
+    id: string;
+    kind: "save" | "delete";
+  } | null>(null);
+  const [memoryActionError, setMemoryActionError] = useState<string | null>(null);
 
   /* --- comparison selection (memories only) --- */
   const [selected, setSelected] = useState<Map<string, string>>(new Map());
@@ -456,6 +463,96 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
           },
         })),
       );
+  };
+
+  const startEditingMemory = (memory: Memory, summary: string) => {
+    setEditingMemoryId(memory.id);
+    setSummaryDraft(summary === "Not available" ? "" : summary);
+    setMemoryActionError(null);
+  };
+
+  const cancelEditingMemory = () => {
+    setEditingMemoryId(null);
+    setSummaryDraft("");
+    setMemoryActionError(null);
+  };
+
+  const saveMemorySummary = async (memory: Memory) => {
+    const summary = summaryDraft.trim();
+    if (!summary) {
+      setMemoryActionError("Summary cannot be empty.");
+      return;
+    }
+
+    setMemoryAction({ id: memory.id, kind: "save" });
+    setMemoryActionError(null);
+    try {
+      await api.updateMemorySummary(memory.id, summary);
+      setMemoryDetails((prev) => ({
+        ...prev,
+        [memory.id]: {
+          data: prev[memory.id]?.data
+            ? { ...prev[memory.id].data, summary }
+            : { ...memory, summary },
+        },
+      }));
+      setItems((prev) =>
+        prev.map((item) =>
+          "raw_text" in item && item.id === memory.id
+            ? { ...item, summary }
+            : item,
+        ),
+      );
+      setEditingMemoryId(null);
+      setSummaryDraft("");
+    } catch (err) {
+      setMemoryActionError(
+        err instanceof Error ? err.message : "Could not update memory",
+      );
+    } finally {
+      setMemoryAction(null);
+    }
+  };
+
+  const deleteMemory = async (memory: Memory) => {
+    const label = memory.title || memory.summary || memory.raw_text;
+    if (!window.confirm(`Permanently delete “${label}”? This cannot be undone.`)) {
+      return;
+    }
+
+    setMemoryAction({ id: memory.id, kind: "delete" });
+    setMemoryActionError(null);
+    try {
+      await api.deleteMemory(memory.id);
+      setItems((prev) => prev.filter((item) => String(item.id) !== memory.id));
+      setTotal((value) => Math.max(0, value - 1));
+      setSelected((prev) => {
+        const next = new Map(prev);
+        next.delete(memory.id);
+        return next;
+      });
+      setMemoryDetails((prev) => {
+        const next = { ...prev };
+        delete next[memory.id];
+        return next;
+      });
+      setRelatedMemories((prev) => {
+        const next = { ...prev };
+        delete next[memory.id];
+        return next;
+      });
+      setEditingMemoryId(null);
+      setExpandedId(null);
+      if (items.length === 1 && offset > 0) {
+        setOffset(Math.max(0, offset - limit));
+      }
+    } catch (err) {
+      setMemoryActionError(
+        err instanceof Error ? err.message : "Could not delete memory",
+      );
+    } finally {
+      setMemoryAction(null);
+    }
   };
 
   /* Resolve an alias-merge suggestion, then refresh the open entity. */
@@ -915,8 +1012,11 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
     const entities = memory.entities || [];
     const relationships = memory.relationships || [];
     const regions = [...(memory.regions || [])].sort((a, b) => b.weight - a.weight);
-    const summary = extraction.summary || memory.summary || "Not available";
+    const summary = memory.summary || extraction.summary || "Not available";
     const labels = [memory.type, ...(memory.tags || [])].filter(Boolean);
+    const isEditing = editingMemoryId === memory.id;
+    const isSaving = memoryAction?.id === memory.id && memoryAction.kind === "save";
+    const isDeleting = memoryAction?.id === memory.id && memoryAction.kind === "delete";
 
     return (
       <div className={styles.memoryDetail}>
@@ -935,7 +1035,37 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
           <p className={styles.rawMemory}>{memory.raw_text || "Not available"}</p>
           <div className={styles.summaryBlock}>
             <span className={styles.detailFieldLabel}>Summary</span>
-            <p>{summary}</p>
+            {isEditing ? (
+              <form
+                className={styles.summaryForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveMemorySummary(memory);
+                }}
+              >
+                <textarea
+                  value={summaryDraft}
+                  onChange={(event) => setSummaryDraft(event.target.value)}
+                  rows={3}
+                  autoFocus
+                  disabled={isSaving}
+                  aria-label="Memory summary"
+                />
+                {memoryActionError && (
+                  <p className={styles.actionError} role="alert">{memoryActionError}</p>
+                )}
+                <div className={styles.memoryActions}>
+                  <button type="button" className="nrg-btn" onClick={cancelEditingMemory} disabled={isSaving}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="nrg-btn" disabled={isSaving || !summaryDraft.trim()}>
+                    {isSaving ? "Saving…" : "Save summary"}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <p>{summary}</p>
+            )}
           </div>
           <div className={styles.coreFooter}>
             <div className={styles.detailChips}>
@@ -943,8 +1073,29 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
                 <span key={`${label}-${index}`} className={styles.detailChip}>{humanize(label)}</span>
               ))}
             </div>
-            <span>Added {formatDate(memory.created_at || memory.ingestion_date)}</span>
+            <div className={styles.memoryActions}>
+              <button
+                type="button"
+                className="nrg-btn"
+                onClick={() => startEditingMemory(memory, summary)}
+                disabled={isDeleting || isEditing}
+              >
+                Edit summary
+              </button>
+              <button
+                type="button"
+                className={`${styles.deleteMemoryBtn} nrg-btn`}
+                onClick={() => void deleteMemory(memory)}
+                disabled={isDeleting || isSaving}
+              >
+                {isDeleting ? "Deleting…" : "Delete memory"}
+              </button>
+              <span>Added {formatDate(memory.created_at || memory.ingestion_date)}</span>
+            </div>
           </div>
+          {!isEditing && memoryActionError && (
+            <p className={styles.actionError} role="alert">{memoryActionError}</p>
+          )}
         </section>
 
         <div className={styles.memoryDetailGrid}>
