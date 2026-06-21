@@ -1,6 +1,11 @@
 .env
 node_modules/
 .DS_Store
+.commandcode/
+.impeccable/
+references/
+tmp/
+web/dist/
 engram.db
 engram.db-shm
 engram.db-wal
