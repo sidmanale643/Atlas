@@ -154,7 +154,11 @@ export default function AuthProvider({ children }: PropsWithChildren) {
     try {
       const result = mode === "login"
         ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
+        : await supabase.auth.signUp({
+            email,
+            password,
+            options: { emailRedirectTo: window.location.origin },
+          });
       if (result.error) {
         setError(result.error.message);
         return false;
