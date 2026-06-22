@@ -32,7 +32,7 @@ const FIRST_PERSON_KEYS = new Set([
 function lowercaseEnvList(name) {
   const raw = process.env[name];
   if (!raw) return [];
-  return raw.split(/[,\s]+/).map((token) => normalizeEntityKey(token)).filter(Boolean);
+  return raw.split(",").map((token) => normalizeEntityKey(token)).filter(Boolean);
 }
 
 let db;

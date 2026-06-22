@@ -37,10 +37,12 @@ const EMPTY_DROP_COUNTS = Object.freeze({
   topics: 0,
 });
 
+// Keep uppercase acronyms and Roman numerals such as "US" and "World War I"
+// from being mistaken for first-person pronouns.
 const FIRST_PERSON_PATTERN =
-  /\b(?:i|me|my|mine|myself|we|us|our|ours|ourselves|self|the speaker)\b/i;
+  /\b(?:I|[Mm]e|[Mm]y|[Mm]ine|[Mm]yself|[Ww]e|[Uu]s|[Oo]ur|[Oo]urs|[Oo]urselves|[Ss]elf|[Tt]he speaker)\b/;
 const SOURCE_AUTHOR_PATTERN =
-  /\b(?:i|me|my|mine|myself|we|us|our|ours|ourselves)\b/i;
+  /\b(?:I|[Mm]e|[Mm]y|[Mm]ine|[Mm]yself|[Ww]e|[Uu]s|[Oo]ur|[Oo]urs|[Oo]urselves)\b/;
 
 export class SemanticValidationError extends Error {
   constructor(result) {
@@ -93,11 +95,15 @@ export function validateSemanticExtraction(sourceText, candidate) {
       dropCounts,
     );
 
-    if (!normalized.durability.durable) {
+    if (
+      !normalized.durability.durable
+      || normalized.durability.confidence
+        < SEMANTIC_ACCEPTANCE_THRESHOLDS.durability
+    ) {
       warnings.push(issue(
         SEMANTIC_VALIDATION_CODES.DURABILITY_REJECTED,
         [...atomPath, "durability"],
-        "dropped atom marked as non-durable",
+        "dropped atom below the durable-memory acceptance threshold",
       ));
       continue;
     }

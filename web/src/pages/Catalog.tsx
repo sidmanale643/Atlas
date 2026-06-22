@@ -488,17 +488,14 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
     setMemoryActionError(null);
     try {
       await api.updateMemorySummary(memory.id, summary);
-      setMemoryDetails((prev) => {
-        const previousMemory = prev[memory.id]?.data;
-        return {
-          ...prev,
-          [memory.id]: {
-            data: previousMemory
-              ? { ...previousMemory, summary }
-              : { ...memory, summary },
-          },
-        };
-      });
+      setMemoryDetails((prev) => ({
+        ...prev,
+        [memory.id]: {
+          data: prev[memory.id]?.data
+            ? { ...prev[memory.id].data, summary }
+          : { ...memory, summary },
+        },
+      }));
       setItems((prev) =>
         prev.map((item) =>
           "raw_text" in item && item.id === memory.id
