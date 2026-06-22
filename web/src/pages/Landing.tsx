@@ -192,8 +192,21 @@ export default function Landing() {
               </>
             ) : (
               <>
-                <button type="button" onClick={() => auth.openAuthModal("login")}>Log in</button>
-                <button type="button" onClick={() => auth.openAuthModal("signup")}>Sign up</button>
+                <button
+                  className={styles.loginButton}
+                  type="button"
+                  onClick={() => auth.openAuthModal("login")}
+                >
+                  Log in
+                </button>
+                <button
+                  className={styles.signupButton}
+                  type="button"
+                  onClick={() => auth.openAuthModal("signup")}
+                >
+                  <span>Sign up</span>
+                  <span className={styles.authArrow} aria-hidden="true">→</span>
+                </button>
               </>
             )}
           </motion.div>
