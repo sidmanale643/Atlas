@@ -301,6 +301,16 @@ function initSchema() {
       ip_hash TEXT PRIMARY KEY,
       submission_count INTEGER NOT NULL DEFAULT 0 CHECK (submission_count >= 0),
       locked_at TEXT,
+      claimed_account_hash TEXT,
+      claimed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_account_quotas (
+      account_hash TEXT PRIMARY KEY,
+      submission_count INTEGER NOT NULL DEFAULT 0 CHECK (submission_count >= 0),
+      locked_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -375,6 +385,10 @@ function initSchema() {
   }
 
   migrateSourceTables();
+  addMissingColumns("memory_ip_quotas", [
+    ["claimed_account_hash", "TEXT"],
+    ["claimed_at", "TEXT"],
+  ]);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_memories_source ON memories(source);
@@ -508,7 +522,7 @@ export function getIpMemoryQuota(ipHash, limit = 10) {
   const row = getDb().prepare(`
     SELECT submission_count FROM memory_ip_quotas WHERE ip_hash = ?
   `).get(ipHash);
-  return formatIpMemoryQuota(row?.submission_count || 0, limit);
+  return formatMemoryQuota(row?.submission_count || 0, limit, false);
 }
 
 export function claimIpMemoryQuota(ipHash, limit = 10) {
@@ -535,9 +549,115 @@ export function claimIpMemoryQuota(ipHash, limit = 10) {
   })();
 }
 
-function formatIpMemoryQuota(used, limit) {
+export function getAccountMemoryQuota(accountHash, limit = 25) {
+  const row = getDb().prepare(`
+    SELECT submission_count FROM memory_account_quotas WHERE account_hash = ?
+  `).get(accountHash);
+  return formatMemoryQuota(row?.submission_count || 0, limit, true);
+}
+
+export function claimAccountMemoryQuota(accountHash, limit = 25) {
+  const database = getDb();
+  return database.transaction(() => {
+    const now = new Date().toISOString();
+    database.prepare(`
+      INSERT OR IGNORE INTO memory_account_quotas (
+        account_hash, submission_count, created_at, updated_at
+      ) VALUES (?, 0, ?, ?)
+    `).run(accountHash, now, now);
+    const result = database.prepare(`
+      UPDATE memory_account_quotas
+      SET submission_count = submission_count + 1,
+          locked_at = CASE
+            WHEN submission_count + 1 >= ? THEN COALESCE(locked_at, ?)
+            ELSE locked_at
+          END,
+          updated_at = ?
+      WHERE account_hash = ? AND submission_count < ?
+    `).run(limit, now, now, accountHash, limit);
+    return {
+      allowed: result.changes === 1,
+      ...getAccountMemoryQuota(accountHash, limit),
+    };
+  })();
+}
+
+export function claimGuestMemoryQuotaForAccount({
+  ipHash,
+  accountHash,
+  accountLimit = 25,
+}) {
+  const database = getDb();
+  return database.transaction(() => {
+    const now = new Date().toISOString();
+    database.prepare(`
+      INSERT OR IGNORE INTO memory_ip_quotas (
+        ip_hash, submission_count, created_at, updated_at
+      ) VALUES (?, 0, ?, ?)
+    `).run(ipHash, now, now);
+
+    const guestQuota = database.prepare(`
+      SELECT submission_count, claimed_account_hash
+      FROM memory_ip_quotas WHERE ip_hash = ?
+    `).get(ipHash);
+    if (guestQuota.claimed_account_hash) {
+      return {
+        claimed: false,
+        transferredMemories: 0,
+        transferredSources: 0,
+        ...getAccountMemoryQuota(accountHash, accountLimit),
+      };
+    }
+
+    database.prepare(`
+      INSERT OR IGNORE INTO memory_account_quotas (
+        account_hash, submission_count, created_at, updated_at
+      ) VALUES (?, 0, ?, ?)
+    `).run(accountHash, now, now);
+    database.prepare(`
+      UPDATE memory_account_quotas
+      SET submission_count = submission_count + ?,
+          locked_at = CASE
+            WHEN submission_count + ? >= ? THEN COALESCE(locked_at, ?)
+            ELSE locked_at
+          END,
+          updated_at = ?
+      WHERE account_hash = ?
+    `).run(
+      guestQuota.submission_count,
+      guestQuota.submission_count,
+      accountLimit,
+      now,
+      now,
+      accountHash,
+    );
+    const memories = database.prepare(`
+      UPDATE memories SET owner_hash = ?, updated_at = ? WHERE owner_hash = ?
+    `).run(accountHash, now, ipHash);
+    const sources = database.prepare(`
+      UPDATE memory_sources
+      SET metadata_json = json_set(metadata_json, '$.ownerHash', ?), updated_at = ?
+      WHERE json_extract(metadata_json, '$.ownerHash') = ?
+    `).run(accountHash, now, ipHash);
+    database.prepare(`
+      UPDATE memory_ip_quotas
+      SET claimed_account_hash = ?, claimed_at = ?, updated_at = ?
+      WHERE ip_hash = ? AND claimed_account_hash IS NULL
+    `).run(accountHash, now, now, ipHash);
+
+    return {
+      claimed: true,
+      transferredMemories: memories.changes,
+      transferredSources: sources.changes,
+      ...getAccountMemoryQuota(accountHash, accountLimit),
+    };
+  })();
+}
+
+function formatMemoryQuota(used, limit, authenticated) {
   const normalizedUsed = Math.max(0, Number(used) || 0);
   return {
+    authenticated,
     limit,
     used: normalizedUsed,
     remaining: Math.max(0, limit - normalizedUsed),

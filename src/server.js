@@ -23,6 +23,7 @@ import { getRelatedMemories as deriveRelatedMemories } from "./related-memories.
 import { retrieveExtractionContext } from "./extraction-context.js";
 import createLogger from "./logger.js";
 import { createIngestionService } from "./ingestion-service.js";
+import { verifyAccessToken } from "./supabase-auth.js";
 import {
   assertAtlasModeSupported,
   deleteAllMemoryVectors,
@@ -81,6 +82,9 @@ import {
   withTransaction,
   claimIpMemoryQuota,
   getIpMemoryQuota,
+  claimAccountMemoryQuota,
+  claimGuestMemoryQuotaForAccount,
+  getAccountMemoryQuota,
 } from "./db.js";
 
 const log = createLogger("server");
@@ -88,6 +92,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, "..", "public");
 const PORT = process.env.PORT || 3001;
 const MEMORY_QUOTA_LIMIT = 10;
+const ACCOUNT_MEMORY_QUOTA_LIMIT = 25;
 const zSourceRevision = z.object({
   text: z.string().min(1).max(2000),
   author: z.string().trim().min(1).max(200).optional(),
@@ -153,6 +158,10 @@ const defaultDependencies = {
   withTransaction,
   claimIpMemoryQuota,
   getIpMemoryQuota,
+  claimAccountMemoryQuota,
+  claimGuestMemoryQuotaForAccount,
+  getAccountMemoryQuota,
+  verifyAccessToken,
 };
 
 export function createAtlasApp(overrides = {}) {
@@ -189,11 +198,49 @@ export function createAtlasApp(overrides = {}) {
     next();
   });
 
+  app.use("/api", async (req, res, next) => {
+    const authorization = req.get("authorization");
+    if (!authorization) {
+      req.identity = anonymousIdentity(req);
+      return next();
+    }
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+      return res.status(401).json({ error: "Invalid authorization header" });
+    }
+    try {
+      const user = await dependencies.verifyAccessToken(match[1]);
+      if (!user?.id) {
+        return res.status(401).json({ error: "Invalid or expired access token" });
+      }
+      req.identity = authenticatedIdentity(req, user);
+      return next();
+    } catch (error) {
+      log.error("access token verification failed", { error: error.message });
+      return res.status(401).json({ error: "Invalid or expired access token" });
+    }
+  });
+
   app.get("/api/memory-quota", (req, res) => {
-    res.json(dependencies.getIpMemoryQuota(
-      hashClientIp(getClientIp(req)),
-      MEMORY_QUOTA_LIMIT,
-    ));
+    const identity = requestIdentity(req);
+    res.json(identity.authenticated
+      ? dependencies.getAccountMemoryQuota(
+        identity.ownerHash,
+        ACCOUNT_MEMORY_QUOTA_LIMIT,
+      )
+      : dependencies.getIpMemoryQuota(identity.ipHash, MEMORY_QUOTA_LIMIT));
+  });
+
+  app.post("/api/auth/claim", (req, res) => {
+    const identity = requestIdentity(req);
+    if (!identity.authenticated) {
+      return res.status(401).json({ error: "Authentication required" });
+    }
+    res.json(dependencies.claimGuestMemoryQuotaForAccount({
+      ipHash: identity.ipHash,
+      accountHash: identity.ownerHash,
+      accountLimit: ACCOUNT_MEMORY_QUOTA_LIMIT,
+    }));
   });
 
   app.post("/api/memories", async (req, res) => {
@@ -202,14 +249,16 @@ export function createAtlasApp(overrides = {}) {
       return res.status(400).json({ error: parsed.error.issues });
     }
 
-    const ownerHash = requestOwnerHash(req);
-    const quota = dependencies.claimIpMemoryQuota(
-      ownerHash,
-      MEMORY_QUOTA_LIMIT,
-    );
+    const identity = requestIdentity(req);
+    const ownerHash = identity.ownerHash;
+    const quota = identity.authenticated
+      ? dependencies.claimAccountMemoryQuota(ownerHash, ACCOUNT_MEMORY_QUOTA_LIMIT)
+      : dependencies.claimIpMemoryQuota(identity.ipHash, MEMORY_QUOTA_LIMIT);
     if (!quota.allowed) {
       return res.status(429).json({
-        error: "You have reached the 10-memory limit for this network.",
+        error: identity.authenticated
+          ? "You have reached the 25-memory account limit."
+          : "You have reached the 10-memory limit for this network.",
         code: "MEMORY_QUOTA_REACHED",
         quota: withoutAllowed(quota),
       });
@@ -730,11 +779,40 @@ function normalizeIp(value) {
 
 function hashClientIp(ip) {
   const salt = process.env.MEMORY_QUOTA_SALT || "neurogram-memory-quota-v1";
-  return createHash("sha256").update(`${salt}:${ip}`).digest("hex");
+  return hashIdentity(salt, "ip", ip);
+}
+
+function hashAccountId(userId) {
+  const salt = process.env.MEMORY_OWNER_SALT
+    || process.env.MEMORY_QUOTA_SALT
+    || "neurogram-memory-owner-v1";
+  return hashIdentity(salt, "account", userId);
+}
+
+function hashIdentity(salt, kind, value) {
+  return createHash("sha256").update(`${salt}:${kind}:${value}`).digest("hex");
+}
+
+function anonymousIdentity(req) {
+  const ipHash = hashClientIp(getClientIp(req));
+  return { authenticated: false, ipHash, ownerHash: ipHash, user: null };
+}
+
+function authenticatedIdentity(req, user) {
+  return {
+    authenticated: true,
+    ipHash: hashClientIp(getClientIp(req)),
+    ownerHash: hashAccountId(user.id),
+    user,
+  };
+}
+
+function requestIdentity(req) {
+  return req.identity || anonymousIdentity(req);
 }
 
 function requestOwnerHash(req) {
-  return hashClientIp(getClientIp(req));
+  return requestIdentity(req).ownerHash;
 }
 
 function ownedMemory(req, memoryId, dependencies) {

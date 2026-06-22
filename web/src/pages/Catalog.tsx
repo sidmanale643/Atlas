@@ -493,7 +493,7 @@ export default function Catalog({ view }: { view: "memories" | "entities" }) {
         [memory.id]: {
           data: prev[memory.id]?.data
             ? { ...prev[memory.id].data, summary }
-            : { ...memory, summary },
+          : { ...memory, summary },
         },
       }));
       setItems((prev) =>

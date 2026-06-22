@@ -77,6 +77,18 @@
   color: var(--green-bright);
   text-shadow: 0 0 8px rgba(56, 130, 246, 0.3);
 }
+.authControls { display: flex; align-items: center; gap: 12px; }
+.authControls button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.authControls button:hover { color: var(--green-bright); }
+.accountEmail { max-width: 180px; overflow: hidden; color: var(--green); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .barCta {
   color: var(--green);
   transition: color 0.15s ease, text-shadow 0.15s ease, box-shadow 0.15s ease;
@@ -89,6 +101,8 @@
   .topnav > a:not(.barCta) {
     display: none;
   }
+  .topnav { gap: 12px; }
+  .authControls button:first-child, .accountEmail { display: none; }
 }
 
 /* --------------------------------------------------------------------- hero */

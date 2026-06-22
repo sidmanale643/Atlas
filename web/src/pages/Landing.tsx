@@ -6,6 +6,7 @@ import InteractiveArchitecture from "../components/InteractiveArchitecture";
 import NeuralCanvas from "../components/NeuralCanvas";
 import EegWaveform from "../components/EegWaveform";
 import styles from "./Landing.module.css";
+import { useAuth } from "../auth/AuthProvider";
 
 /** Inline style carrying a CSS custom property (e.g. --i, --w). */
 const cssVars = (vars: Record<string, string>): CSSProperties =>
@@ -129,6 +130,7 @@ function Oscilloscope() {
 /* ------------------------------------------------------------------ page */
 
 export default function Landing() {
+  const auth = useAuth();
   const rootRef = useRef<HTMLDivElement>(null);
   const [extracted, setExtracted] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -182,6 +184,19 @@ export default function Landing() {
           <motion.a href="#mcp" variants={fadeUp}>Connect</motion.a>
           <motion.a href="#science" variants={fadeUp}>Science</motion.a>
           <motion.a href="https://github.com/sidmanale643/Atlas" target="_blank" rel="noopener noreferrer" variants={fadeUp}>GitHub</motion.a>
+          <motion.div className={styles.authControls} variants={fadeUp}>
+            {auth.state.kind === "authenticated" ? (
+              <>
+                <span className={styles.accountEmail} title={auth.state.user.email}>{auth.state.user.email ?? "Signed in"}</span>
+                <button type="button" onClick={() => void auth.logout()}>Log out</button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => auth.openAuthModal("login")}>Log in</button>
+                <button type="button" onClick={() => auth.openAuthModal("signup")}>Sign up</button>
+              </>
+            )}
+          </motion.div>
           <motion.a className={`nrg-btn ${styles.barCta}`} href="/atlas" variants={fadeUp}>
             Open the atlas
           </motion.a>
