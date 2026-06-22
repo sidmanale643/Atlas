@@ -46,10 +46,18 @@ export default function AuthProvider({ children }: PropsWithChildren) {
   const [modalMode, setModalMode] = useState<AuthModalMode | null>(null);
   const [quotaPrompt, setQuotaPrompt] = useState<Quota | null>(null);
   const claimedUserRef = useRef<string | null>(null);
-  const pendingClaimRef = useRef<{ userId: string; promise: Promise<Quota> } | null>(null);
+  const latestSessionTokenRef = useRef<string | null>(null);
+  const pendingClaimRef = useRef<{
+    userId: string;
+    accessToken: string;
+    promise: Promise<Quota>;
+  } | null>(null);
 
-  const claimGuestData = useCallback((userId: string): Promise<Quota> => {
-    if (pendingClaimRef.current?.userId === userId) return pendingClaimRef.current.promise;
+  const claimGuestData = useCallback((userId: string, accessToken: string): Promise<Quota> => {
+    if (
+      pendingClaimRef.current?.userId === userId &&
+      pendingClaimRef.current.accessToken === accessToken
+    ) return pendingClaimRef.current.promise;
     const promise = (async () => {
       const claimResponse = await apiFetch("/api/auth/claim", { method: "POST" });
       if (!claimResponse.ok) throw new Error(await responseMessage(claimResponse));
@@ -61,14 +69,18 @@ export default function AuthProvider({ children }: PropsWithChildren) {
       window.dispatchEvent(new CustomEvent(AUTH_CLAIMED_EVENT, { detail: claimedQuota }));
       return claimedQuota;
     })().finally(() => {
-      if (pendingClaimRef.current?.userId === userId) pendingClaimRef.current = null;
+      if (
+        pendingClaimRef.current?.userId === userId &&
+        pendingClaimRef.current.accessToken === accessToken
+      ) pendingClaimRef.current = null;
     });
-    pendingClaimRef.current = { userId, promise };
+    pendingClaimRef.current = { userId, accessToken, promise };
     return promise;
   }, []);
 
   const establishSession = useCallback(async (session: Session | null) => {
     const token = session?.access_token ?? null;
+    latestSessionTokenRef.current = token;
     setApiAccessToken(token);
     if (!session) {
       claimedUserRef.current = null;
@@ -81,12 +93,16 @@ export default function AuthProvider({ children }: PropsWithChildren) {
 
     setState({ kind: "loading", user: null, session: null });
     try {
-      if (claimedUserRef.current !== session.user.id) await claimGuestData(session.user.id);
+      if (claimedUserRef.current !== session.user.id) {
+        await claimGuestData(session.user.id, token);
+      }
+      if (latestSessionTokenRef.current !== token) return;
       setError(null);
       setState({ kind: "authenticated", user: session.user, session });
       setModalMode(null);
       setQuotaPrompt(null);
     } catch (claimError) {
+      if (latestSessionTokenRef.current !== token) return;
       setError(claimError instanceof Error ? claimError.message : "Could not claim guest memories.");
       setState({ kind: "authenticated", user: session.user, session });
     }
